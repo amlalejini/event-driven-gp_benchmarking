@@ -12,19 +12,30 @@ Can I show that rewiring is actually trivial? Rewiring function calls vs. specia
 Stretch: how do systems respond to perturbations (antagonistic and neutral)?
 
 ## Benchmark Tasks/Environments
+To evaluate usefulness of capturing the event-driven paradigm, benchmark Signal GP with and without access to event-driven paradigm on several environments/tasks.
+
+For sure: consensus, pattern matching
+Maybe: lawnmower, predator/prey, foraging
+
 ### Consensus/Leader Election
 Pull problem description primarily from (Weise and Tang, 2012) and (Knoester et al., 2013).
 
 Evolve populations of distributed systems. When evaluating a system, initialize all agents within the system with identical programs (homogeneous systems).
 
-Mutation occurs on group replication. Two options for replication: (1) EA style - evaluate entire population, assign fitnesses, tournament selection, (2) asynchronous - replicate on consensus.  
+Mutation occurs on group replication. Two options for replication: (1) EA style - evaluate entire population, assign fitnesses, tournament selection, (2) asynchronous - replicate on consensus (issue: bootstrapping evolution of consensus).  
 
-###### Things to keep in mind:
+#### Treatments
+* Event-driven messaging, tag-based referencing
+* Event-driven messaging, hardcoded function names (affinities can't mutate; make available all possible affinity-instruction pairings)
+* Imperative messaging, tag-based referencing
+* Imperative messaging, hardcoded function names
+
+#### Things to keep in mind:
 * Pressure for achieving efficiency. (+ [Total Time - Time for consensus])
 * Likely fitness function: max(supported ID) + [total time - time in which consensus is achieved]
   - What about maintaining consensus?
 
-##### Problem description from (Weise and Tang, 2012):
+#### Problem description from (Weise and Tang, 2012):
 Given network N of nodes n performing an election is as follows:
 1. The IDs of nodes are unique numbers drawn from N<sub>0</sub> and the order imposed on them is the less-than relation.
 2. A node does not know the IDs of other nodes.
@@ -37,11 +48,11 @@ Group genetic make-up: homogeneous
 
 Agents: Could message neighboring agents (though messages had lag). Check and set vote ID.
 
-##### Problem description from (Knoester et al., 2013):
+#### Problem description from (Knoester et al., 2013):
 
 Agents: Agents have an orientation that they can change (i.e. rotation is possible). Agents can send/retrieve messages.
 
-###### Treatments
+##### Treatments
 * Individual-level replication:
   1. germline
     * When an individual in a deme replicates, it produces an identical offspring. Homogeneous/clonal demes. Mutations only introduced on deme replication.
@@ -54,7 +65,7 @@ Agents: Agents have an orientation that they can change (i.e. rotation is possib
 * Gene flow among demes
   - 2 treatments w/gene flow: Migration and Wilcox (will not worry about this)
 
-###### Relevant instructions:
+##### Relevant instructions:
 * send-msg: sends message to faced neighbor
 * retrieve-msg: loads previously received message
 * bcast1: sends message to all neighboring cells
@@ -72,7 +83,39 @@ T. Weise and K. Tang, “Evolving Distributed Algorithms With Genetic Programmin
 
 D. B. Knoester, H. J. Goldsby, and P. K. McKinley, “Genetic Variation and the Evolution of Consensus in Digital Organisms,” IEEE Trans. Evol. Computat., vol. 17, no. 3, pp. 403–417, May 2013.
 
-### Lawnmower Problem
+### Pattern Matching
+Distributed systems are tasked with expressing (and maintaining) a pre-determined pattern.
+
+Pattern: French flag (of arbitrary orientation).
+
+Extend the consensus environment in terms of agent capabilities (eliminate agent identifiers, though). 
+
+#### Treatments
+* Event-driven messaging, tag-based referencing
+  - Messages trigger events upon receiving.
+  - Messages have affinities(i.e. tags) that determine which function they call.
+  - Calls have affinities that bind to proper functions.
+* Event-driven messaging, hardcoded referencing
+  - Messages trigger events upon receiving.
+  - Events call a function by ID. (send-msg arg1 => ID = arg1 % function count)  
+* Imperative messaging, tag-based referencing
+  - Messages are sent to inbox, must be requested via instruction.
+  - Call operates with affinities.
+* Imperative messaging, hardcoded referencing
+  - Messages send to inbox, must be requested via instruction.
+  - Call calls function ID determined by arg1 % function count.
+
+#### References:
+D. Federici and K. Downing, “Evolution and Development of a Multicellular Organism: Scalability, Resilience, and Neutral Complexification,” Artif. Life, vol. 12, no. 3, pp. 381–409, 2006.
+
+### [~]Central-place Foraging Problem
+
+#### References
+C. M. Byers, B. H. C. Cheng, and P. K. McKinley, Digital enzymes: agents of reaction inside robotic controllers for the foraging problem. New York, New York, USA: ACM, 2011, pp. 243–250.
+
+### [~]Robot Tag (predator-prey)
+
+### [~]Lawnmower Problem
 This problem is described and used in both a modified and original form in Spector et al. 2011.
 
 ##### Problem Description from (Spector et al., 2011) and (Koza, 1992)
@@ -93,17 +136,10 @@ NOTE: will want to checkout original specification of problem.
   * frog -- one-argument operator that jumps the lawnmower ahead and sideways an amount indicated by its vector argument (while mowing the destination).
   * progn -- two argument sequencing function
 
-
-
 #### References:
 L. Spector, B. Martin, K. Harrington, and T. Helmuth, Tag-based modules in genetic programming. New York, New York, USA: ACM, 2011, pp. 1419–1426.
 
 Koza, J. R. (1992). Genetic programming: on the programming of computers by means of natural selection (Vol. 1). MIT press.
-
-### Pattern Matching
-
-#### References:
-D. Federici and K. Downing, “Evolution and Development of a Multicellular Organism: Scalability, Resilience, and Neutral Complexification,” Artif. Life, vol. 12, no. 3, pp. 381–409, 2006.
 
 ## Benchmarking Tests
 - Task success
