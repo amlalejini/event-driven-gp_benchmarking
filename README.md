@@ -88,7 +88,7 @@ Distributed systems are tasked with expressing (and maintaining) a pre-determine
 
 Pattern: French flag (of arbitrary orientation).
 
-Extend the consensus environment in terms of agent capabilities (eliminate agent identifiers, though). 
+Extend the consensus environment in terms of agent capabilities (eliminate agent identifiers, though).
 
 #### Treatments
 * Event-driven messaging, tag-based referencing
@@ -113,7 +113,9 @@ D. Federici and K. Downing, “Evolution and Development of a Multicellular Orga
 #### References
 C. M. Byers, B. H. C. Cheng, and P. K. McKinley, Digital enzymes: agents of reaction inside robotic controllers for the foraging problem. New York, New York, USA: ACM, 2011, pp. 243–250.
 
-### [~]Robot Tag (predator-prey)
+### Robot Tag (predator-prey)
+
+See work done by Randy Olson. 
 
 ### [~]Lawnmower Problem
 This problem is described and used in both a modified and original form in Spector et al. 2011.
