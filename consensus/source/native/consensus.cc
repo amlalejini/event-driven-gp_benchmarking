@@ -2,23 +2,35 @@
 
 #include <iostream>
 #include <deque>
+#include <unordered_set>
 
 #include "base/Ptr.h"
+#include "base/vector.h"
+#include "config/ArgManager.h"
 #include "tools/Random.h"
 #include "tools/random_utils.h"
+#include "tools/math.h"
 #include "hardware/EventDrivenGP.h"
 #include "Evo/World.h"
 
+#include "consensus-config.h"
+
 constexpr size_t AFFINITY_WIDTH = 16;
-constexpr size_t TRAIT_ID__LOC = 0;
-constexpr size_t TRAIT_ID__DIR = 1;
-constexpr size_t TRAIT_ID__UID = 2;
+
+constexpr size_t TRAIT_ID__LOC     = 0;
+constexpr size_t TRAIT_ID__DIR     = 1;
+constexpr size_t TRAIT_ID__UID     = 2;
+constexpr size_t TRAIT_ID__OPINION = 3;
+
 constexpr size_t NUM_NEIGHBORS = 4;
 
-static constexpr size_t DIR_UP = 0;
-static constexpr size_t DIR_LEFT = 1;
-static constexpr size_t DIR_DOWN = 2;
-static constexpr size_t DIR_RIGHT = 3;
+constexpr size_t DIR_UP = 0;
+constexpr size_t DIR_LEFT = 1;
+constexpr size_t DIR_DOWN = 2;
+constexpr size_t DIR_RIGHT = 3;
+
+constexpr size_t MIN_UID = 1;
+constexpr size_t MAX_UID = 10000;
 
 // class ImperativeGP : public emp::EventDrivenGP {
 // public:
@@ -59,6 +71,7 @@ public:
   using event_t = hardware_t::event_t;
   using event_lib_t = hardware_t::event_lib_t;
   using memory_t = hardware_t::memory_t;
+  using affinity_t = hardware_t::affinity_t;
 
 
   /// Struct to keep track of agents (target of evolution) for the Consensus experiment.
@@ -84,26 +97,30 @@ public:
     emp::vector<size_t> schedule;
     emp::vector<inbox_t> inboxes;
 
+    std::unordered_set<size_t> uids;
+
     emp::Ptr<emp::Random> rnd;
     emp::Ptr<Agent> germ;
 
     Deme(emp::Ptr<emp::Random> _rnd, size_t _w, size_t _h, size_t _ibox_cap, emp::Ptr<inst_lib_t> _ilib, emp::Ptr<event_lib_t> _elib)
       : grid(), width(_w), height(_h), inbox_capacity(_ibox_cap),
-        schedule(), inboxes(), rnd(_rnd), germ(nullptr)
+        schedule(width*height), inboxes(width*height),
+        rnd(_rnd), germ(nullptr)
     {
       // Fill out the grid with hardware.
       for (size_t i = 0; i < width * height; ++i) {
         grid.emplace_back(_ilib, _elib, rnd);
-        schedule.emplace_back(i);
+        schedule[i] = i;
+        uids.emplace(i);
         hardware_t & cpu = grid.back();
         cpu.SetTrait(TRAIT_ID__LOC, i);
-        cpu.SetTrait(TRAIT_ID__UID, i);
         cpu.SetTrait(TRAIT_ID__DIR, 0);
+        cpu.SetTrait(TRAIT_ID__UID, i);
+        cpu.SetTrait(TRAIT_ID__OPINION, 0); // Opinion of 0 implies that no opinion was set.
         // Configure CPU
         // cpu.SetMinBind();
         //
       }
-      inboxes.resize(width * height);
     }
 
     ~Deme() {
@@ -113,6 +130,7 @@ public:
 
     void Reset() {
       germ = nullptr;
+      // TODO: reset traits!
       for (size_t i = 0; i < grid.size(); ++i) { grid[i].ResetHardware(); }
     }
 
@@ -132,9 +150,8 @@ public:
     size_t GetLocY(size_t id) const { return id / width; }
     size_t GetID(size_t x, size_t y) const { return (y * width) + x; }
 
-    //size_t GetFacing(size_t id) //< return ID of agent faced by given ID.
-    size_t GetFacing(size_t id) const {
-      size_t dir = (size_t)grid[id].GetTrait(TRAIT_ID__DIR);
+    /// Get location adjacent to ID in direction dir.
+    size_t GetNeighbor(size_t id, size_t dir) const {
       int facing_x = (int)GetLocX(id);
       int facing_y = (int)GetLocY(id);
       switch(dir) {
@@ -149,7 +166,10 @@ public:
       return GetID(facing_x, facing_y);
     }
 
+    size_t GetFacing(size_t id) const { return GetNeighbor(id, (size_t)grid[id].GetTrait(TRAIT_ID__DIR)); }
+
     bool InboxFull(size_t id) const { return inboxes[id].size() >= inbox_capacity; }
+    bool InboxEmpty(size_t id) const { return inboxes[id].empty(); }
 
     inbox_t & GetInbox(size_t id) { return inboxes[id]; }
     hardware_t & GetHardware(size_t id) { return grid[id]; }
@@ -157,6 +177,17 @@ public:
     void DeliverToInbox(size_t id, const event_t & event) {
       while (InboxFull(id)) inboxes[id].pop_front(); // Make room for new message in inbox. Remove oldest first.
       inboxes[id].emplace_back(event);
+    }
+
+    /// Randomize unique identifiers for each agent.
+    void RandomizeUIDS() {
+      emp_assert(MAX_UID - MIN_UID > grid.size());
+      uids.clear();
+      for (size_t i = 0; i < grid.size(); ++i) {
+        size_t val = rnd->GetUInt(MIN_UID, MAX_UID);
+        while (emp::Has(uids, val)) { val = rnd->GetUInt(MIN_UID, MAX_UID); }
+        grid[i].SetTrait(TRAIT_ID__UID, val);
+      }
     }
 
     void Advance(size_t t = 1) { for (size_t i = 0; i < t; ++i) SingleAdvance(); }
@@ -187,16 +218,24 @@ protected:
 
   emp::Ptr<Deme> eval_deme;
 
+  emp::vector<affinity_t> affinity_table;
+
 public:
   ConsensusExp(int _random_seed, bool _event_driven)
     : RANDOM_SEED(_random_seed), EVENT_DRIVEN(_event_driven),
-      DEME_WIDTH(5), DEME_HEIGHT(5), INBOX_CAPACITY(8)
+      DEME_WIDTH(5), DEME_HEIGHT(5), INBOX_CAPACITY(8),
+      affinity_table(emp::Pow2(AFFINITY_WIDTH))
   {
     random = emp::NewPtr<emp::Random>(RANDOM_SEED);
     world = emp::NewPtr<world_t>(random, "Consensus-World");
     inst_lib = emp::NewPtr<inst_lib_t>();
     event_lib = emp::NewPtr<event_lib_t>();
     eval_deme = emp::NewPtr<Deme>(random, DEME_WIDTH, DEME_HEIGHT, INBOX_CAPACITY, inst_lib, event_lib);
+
+    // Fill out our convenient affinity table.
+    for (size_t i = 0; i < affinity_table.size(); ++i) {
+      affinity_table[i].SetByte(0, (uint8_t)i);
+    }
 
     // - Setup the instruction set. -
     // Standard instructions:
@@ -235,15 +274,17 @@ public:
     // Communication instructions:
     inst_lib->AddInst("SendMsgFacing", Inst_SendMsgFacing, 0, "Send output memory as message event to faced neighbor.", emp::ScopeType::BASIC, 0, {"affinity"});
     inst_lib->AddInst("BroadcastMsg", Inst_BroadcastMsg, 0, "Broadcast output memory as message event.", emp::ScopeType::BASIC, 0, {"affinity"});
-
-    // Imperative-specific instructions
-    // inst_lib->AddInst("RetrieveMsg", ..., 0, ...);
+    // Consensus-specific instructions:
+    inst_lib->AddInst("GetUID", Inst_GetUID, 1, "");
+    inst_lib->AddInst("SetOpinion", Inst_SetOpinion, 1, "");
 
     // - Setup event library. -
     event_lib->AddEvent("MessageFacing", HandleEvent_MessageForking, "Event for messaging neighbors.");
     event_lib->AddEvent("MessageBroadcast", HandleEvent_MessageForking, "Event for broadcasting a message.");
 
+    // - Setup event-driven vs. imperative differences. -
     if (EVENT_DRIVEN) {
+      // Event-driven-specific.
       event_lib->RegisterDispatchFun("MessageFacing", [this](hardware_t & hw, const event_t & event) {
         this->EventDriven__DispatchMessageFacing(hw, event);
       });
@@ -251,6 +292,10 @@ public:
         this->EventDriven__DispatchMessageBroadcast(hw, event);
       });
     } else {
+      // Imperative-specific.
+      inst_lib->AddInst("RetrieveMsg", [this](hardware_t & hw, const inst_t & inst) {
+        this->Inst_RetrieveMsg(hw, inst);
+      }, 0, "Retrieve a message from message inbox.");
       event_lib->RegisterDispatchFun("MessageFacing", [this](hardware_t & hw, const event_t & event) {
         this->Imperative__DispatchMessageFacing(hw, event);
       });
@@ -284,12 +329,20 @@ public:
 
   /// Dispatch to all neighbors.
   void EventDriven__DispatchMessageBroadcast(hardware_t hw, const event_t & event) {
-    // TODO
+    const size_t loc_id = (size_t)hw.GetTrait(TRAIT_ID__LOC);
+    eval_deme->GetHardware(eval_deme->GetNeighbor(loc_id, DIR_UP)).QueueEvent(event);
+    eval_deme->GetHardware(eval_deme->GetNeighbor(loc_id, DIR_DOWN)).QueueEvent(event);
+    eval_deme->GetHardware(eval_deme->GetNeighbor(loc_id, DIR_RIGHT)).QueueEvent(event);
+    eval_deme->GetHardware(eval_deme->GetNeighbor(loc_id, DIR_LEFT)).QueueEvent(event);
   }
 
   /// Dispatch to all neighbors' inbox.
   void Imperative__DispatchMessageBroadcast(hardware_t hw, const event_t & event) {
-    // TODO
+    const size_t loc_id = (size_t)hw.GetTrait(TRAIT_ID__LOC);
+    eval_deme->DeliverToInbox(eval_deme->GetNeighbor(loc_id, DIR_UP), event);
+    eval_deme->DeliverToInbox(eval_deme->GetNeighbor(loc_id, DIR_DOWN), event);
+    eval_deme->DeliverToInbox(eval_deme->GetNeighbor(loc_id, DIR_RIGHT), event);
+    eval_deme->DeliverToInbox(eval_deme->GetNeighbor(loc_id, DIR_LEFT), event);
   }
 
   // ============== Some instructions used in this experiment: ==============
@@ -340,6 +393,30 @@ public:
     hw.TriggerEvent("MessageBroadcast", inst.affinity, state.output_mem, {"broadcast"});
   }
 
+  /// Instruction:
+  /// Description:
+  static void Inst_GetUID(hardware_t & hw, const inst_t & inst) {
+    state_t & state = hw.GetCurState();
+    state.SetLocal(inst.args[0], hw.GetTrait(TRAIT_ID__UID));
+  }
+
+  /// Instruction:
+  /// Description:
+  static void Inst_SetOpinion(hardware_t & hw, const inst_t & inst) {
+    state_t & state = hw.GetCurState();
+    hw.SetTrait(TRAIT_ID__OPINION, state.AccessLocal(inst.args[0]));
+  }
+
+  /// Instruction: RetrieveMsg
+  /// Description:
+  void Inst_RetrieveMsg(hardware_t hw, const inst_t & inst) {
+    const size_t loc_id = (size_t)hw.GetTrait(TRAIT_ID__LOC);
+    if (!eval_deme->InboxEmpty(loc_id)) {
+      hw.HandleEvent(eval_deme->GetInbox(loc_id).front());  // NOTE: Assumes that Event handler won't mess with inbox.
+      eval_deme->GetInbox(loc_id).pop_front();
+    }
+  }
+
   // ============== Some event handlers used in this experiment: ==============
   static void HandleEvent_MessageForking(hardware_t & hw, const event_t event) {
     // Spawn a new core.
@@ -350,10 +427,30 @@ public:
 
 };
 
-int main()
+int main(int argc, char * argv[])
 {
-  // TODO: Load configs.
   // TODO: Create/configure consensus experiment.
-  ConsensusExp e(2, true);
-  std::cout << "Hello World!" << std::endl;
+  std::string config_fname = "configs.cfg";
+
+  auto args = emp::cl::ArgManager(argc, argv);
+
+  ConsensusConfig config;
+  config.Read(config_fname);
+  if (args.ProcessConfigOptions(config, std::cout, config_fname, "consensus-config.h") == false) exit(0);
+  if (args.TestUnknown() == false) exit(0);
+
+  std::cout << "==============================" << std::endl;
+  std::cout << "|    How am I configured?    |" << std::endl;
+  std::cout << "==============================" << std::endl;
+  config.Write(std::cout);
+  std::cout << "==============================" << std::endl;
+
+  int RANDOM_SEED        = config.RANDOM_SEED();
+  bool EVENT_DRIVEN      = true;
+  size_t DEME_WIDTH      = 5;
+  size_t DEME_HEIGHT     = 5;
+  size_t INBOX_CAPACITY  = 8;
+
+  ConsensusExp e(RANDOM_SEED, EVENT_DRIVEN);
+  std::cout << "Hello there!" << std::endl;
 }
