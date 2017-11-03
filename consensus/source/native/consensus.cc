@@ -32,33 +32,6 @@ constexpr size_t DIR_RIGHT = 3;
 constexpr size_t MIN_UID = 1;
 constexpr size_t MAX_UID = 10000;
 
-// class ImperativeGP : public emp::EventDrivenGP {
-// public:
-//   using emp::EventDrivenGP::event_t;
-// protected:
-//   std::deque<event_t> msg_inbox;
-//   size_t msg_inbox_capacity;
-// public:
-//   bool InboxFull() { return msg_inbox.size() >= msg_inbox_capacity; }
-//   // NOTE: This will not work.
-//   /// Instruction to retrieve a message from the message inbox.
-//   static void RetrieveMsg(ImperativeGP & hw, const inst_t inst) {
-//     std::cout << "Retrieve a message from the message inbox!" << std::endl;
-//     if (!hw.msg_inbox.empty()) {
-//       const event_t & msg = hw.msg_inbox.front();
-//       hw.SpawnCore(msg.affinity, hw.GetMinBindThresh(), msg.msg);
-//       hw.msg_inbox.pop_front();
-//     }
-//   }
-//
-//   /// Event handler to
-//   static void HandleEvent_Message(ImperativeGP & hw, const event_t & event) {
-//     std::cout << "Handling message event!" << std::endl;
-//     while (hw.InboxFull()) hw.msg_inbox.pop_front(); // Make room for new message in inbox. Remove oldest first.
-//     hw.msg_inbox.emplace_back(event);
-//   }
-// };
-
 /// Class to manage a concensus experiment.
 ///  - Will be configured based on treatment parameters.
 class ConsensusExp {
@@ -77,6 +50,9 @@ public:
   /// Struct to keep track of agents (target of evolution) for the Consensus experiment.
   struct Agent {
     program_t program;
+    size_t full_consensus_time;
+    size_t valid_votes;
+    size_t max_consensus;
 
     Agent(const program_t & _p)
       : program(_p) { ; }
@@ -98,14 +74,17 @@ public:
     emp::vector<inbox_t> inboxes;
 
     std::unordered_set<size_t> uids;
+    std::unordered_multiset<size_t> valid_votes;
+    size_t max_vote_cnt;
 
     emp::Ptr<emp::Random> rnd;
-    emp::Ptr<Agent> germ;
+    program_t germ_prog;
 
     Deme(emp::Ptr<emp::Random> _rnd, size_t _w, size_t _h, size_t _ibox_cap, emp::Ptr<inst_lib_t> _ilib, emp::Ptr<event_lib_t> _elib)
       : grid(), width(_w), height(_h), inbox_capacity(_ibox_cap),
         schedule(width*height), inboxes(width*height),
-        rnd(_rnd), germ(nullptr)
+        uids(), valid_votes(), max_vote_cnt(0),
+        rnd(_rnd), germ_prog(_ilib)
     {
       // Fill out the grid with hardware.
       for (size_t i = 0; i < width * height; ++i) {
@@ -129,22 +108,36 @@ public:
     }
 
     void Reset() {
-      germ = nullptr;
+      germ_prog.Clear();
       // TODO: reset traits!
-      for (size_t i = 0; i < grid.size(); ++i) { grid[i].ResetHardware(); }
+      uids.clear(); // Reset UIDs.
+      valid_votes.clear();
+      max_vote_cnt = 0;
+      for (size_t i = 0; i < grid.size(); ++i) {
+        schedule[i] = i;  // Rejigger the schedule.
+        uids.emplace(i);  // UID = grid ID
+        grid[i].ResetHardware();  // Reset CPU hardware and traits (below).
+        grid[i].SetTrait(TRAIT_ID__LOC, i);
+        grid[i].SetTrait(TRAIT_ID__DIR, 0);
+        grid[i].SetTrait(TRAIT_ID__UID, i);
+        grid[i].SetTrait(TRAIT_ID__OPINION, 0);
+      }
     }
 
-    void SetGerm(emp::Ptr<Agent> _germ) {
+    void SetProgram(const program_t & _germ) {
       Reset();
-      germ = _germ;
+      germ_prog = _germ;
       for (size_t i = 0; i < grid.size(); ++i) {
-        grid[i].SetProgram(germ->program);
+        grid[i].SetProgram(germ_prog);
         grid[i].SpawnCore(0, memory_t(), true);
       }
     }
 
+    const program_t & GetProgram() const { return germ_prog; }
+
     size_t GetWidth() const { return width; }
     size_t GetHeight() const { return height; }
+    size_t GetSize() const { return grid.size(); }
 
     size_t GetLocX(size_t id) const { return id % width; }
     size_t GetLocY(size_t id) const { return id / width; }
@@ -183,6 +176,8 @@ public:
     void RandomizeUIDS() {
       emp_assert(MAX_UID - MIN_UID > grid.size());
       uids.clear();
+      valid_votes.clear();
+      max_vote_cnt = 0;
       for (size_t i = 0; i < grid.size(); ++i) {
         size_t val = rnd->GetUInt(MIN_UID, MAX_UID);
         while (emp::Has(uids, val)) { val = rnd->GetUInt(MIN_UID, MAX_UID); }
@@ -194,8 +189,20 @@ public:
 
     void SingleAdvance() {
       emp::Shuffle(*rnd, schedule); // Shuffle the schedule.
+      valid_votes.clear();
+      max_vote_cnt = 0;
       // Distribute the CPU cycles.
-      for (size_t i = 0; i < schedule.size(); ++i) { grid[schedule[i]].SingleProcess(); }
+      for (size_t i = 0; i < schedule.size(); ++i) {
+        grid[schedule[i]].SingleProcess();
+        // Has i voted for a valid agent?
+        size_t vote_i = (size_t)grid[schedule[i]].GetTrait(TRAIT_ID__OPINION));
+        if (emp::Has(uids, vote_i) {
+          // If so, add i's vote.
+          valid_votes.emplace(vote_i);
+          size_t cnt = valid_votes.count(vote_i);
+          if (cnt > max_vote_cnt) max_vote_cnt = cnt;
+        }
+      }
     }
   };
 
@@ -204,11 +211,15 @@ public:
 protected:
   // == Configurable experiment parameters ==
   // TODO: PARAMETERIZE THIS STUFF! (using config system)
-  int RANDOM_SEED;
-  bool EVENT_DRIVEN;
-  size_t DEME_WIDTH;
-  size_t DEME_HEIGHT;
-  size_t INBOX_CAPACITY;
+  int RANDOM_SEED;        //< Random seed to use for this experiment.
+  bool EVENT_DRIVEN;      //< Is this consensus experiment event driven?
+  size_t DEME_WIDTH;      //< Width (in cells) of a deme. Deme size = deme width * deme height.
+  size_t DEME_HEIGHT;     //< Height (in cells) of a deme. Deme size = deme width * deme height.
+  size_t INBOX_CAPACITY;  //< Message inbox capacity for agents. Only relevant for imperative agents.
+  size_t DEME_CNT;        //< Population size. i.e. the number of demes in the population at each generation.
+  size_t GENERATIONS;     //< How many generations (iterations of evolution) should we run the experiment?
+  size_t DEME_EVAL_TIME;       //< How long should each deme get to evaluate?
+  std::string ANCESTOR_FPATH;  //< Path to the ancestor to seed population with.
 
   emp::Ptr<emp::Random> random;
   emp::Ptr<world_t> world;
@@ -220,10 +231,14 @@ protected:
 
   emp::vector<affinity_t> affinity_table;
 
+  // std::unordered_multiset<size_t> consensi; //< Valid vote counts in a deme.
+
 public:
   ConsensusExp(int _random_seed, bool _event_driven)
     : RANDOM_SEED(_random_seed), EVENT_DRIVEN(_event_driven),
       DEME_WIDTH(5), DEME_HEIGHT(5), INBOX_CAPACITY(8),
+      DEME_CNT(100), GENERATIONS(100), DEME_EVAL_TIME(256),
+      ANCESTOR_FPATH("ancestor.gp"),
       affinity_table(emp::Pow2(AFFINITY_WIDTH))
   {
     random = emp::NewPtr<emp::Random>(RANDOM_SEED);
@@ -275,8 +290,8 @@ public:
     inst_lib->AddInst("SendMsgFacing", Inst_SendMsgFacing, 0, "Send output memory as message event to faced neighbor.", emp::ScopeType::BASIC, 0, {"affinity"});
     inst_lib->AddInst("BroadcastMsg", Inst_BroadcastMsg, 0, "Broadcast output memory as message event.", emp::ScopeType::BASIC, 0, {"affinity"});
     // Consensus-specific instructions:
-    inst_lib->AddInst("GetUID", Inst_GetUID, 1, "");
-    inst_lib->AddInst("SetOpinion", Inst_SetOpinion, 1, "");
+    inst_lib->AddInst("GetUID", Inst_GetUID, 1, "LocalReg[Arg1] = Trait[UID]");
+    inst_lib->AddInst("SetOpinion", Inst_SetOpinion, 1, "Trait[UID] = LocalReg[UID]");
 
     // - Setup event library. -
     event_lib->AddEvent("MessageFacing", HandleEvent_MessageForking, "Event for messaging neighbors.");
@@ -305,13 +320,61 @@ public:
     }
 
     // TODO: Non-forking message handler?
-    world->SetWellMixed(true);
+    program_t ancestor_prog(inst_lib);
+    std::ifstream ancestor_fstream(ANCESTOR_FPATH);
+    if (!ancestor_fstream.is_open()) {
+      std::cout << "Failed to open ancestor program file(" << ANCESTOR_FPATH << "). Exiting..." << std::endl;
+      exit(-1);
+    }
+    ancestor_prog.Load(ancestor_fstream);
+
+    std::cout << " --- Ancestor program: ---" << std::endl;
+    ancestor_prog.PrintProgramFull();
+    std::cout << " -------------------------" << std::endl;
+
+
+    // Configure the world.
+    world->SetWellMixed(true);                 // Deme germs are well-mixed. (no need for keeping track of deme-deme spatial information)
+    world->Inject(ancestor_prog, DEME_CNT);    // Inject a bunch of ancestor deme-germs into the population.
+
+    // for (size_t i = 0; i < world->GetSize(); ++i) {
+    //   std::cout << "####### i: " << i << " ########" << std::endl;
+    //   world->GetOrg(i).GetGenome().PrintProgramFull();
+    //   std::cout << std::endl;
+    // }
 
   }
 
   ~ConsensusExp() {
     world.Delete();
     random.Delete();
+  }
+
+  /// Run the experiment!
+  void Run() {
+    // for (size_t ud = 0; ud < )
+    size_t full_consensus_time = 0;
+    for (size_t ud = 0; ud < GENERATIONS; ++ud) {
+      // Evaluate each agent.
+      for (size_t id = 0; world->GetSize(); ++id) {
+        eval_deme->SetProgram(world->GetGenomeAt(id));  // Load agent's program onto evaluation deme.
+        eval_deme->RandomizeUIDS();         // Randomize evaluation deme hardwares' UIDs.
+        full_consensus_time = 0;            // Reset full consensus tracker.
+        // Run the deme for some amount of time.
+        for (size_t t = 0; t < DEME_EVAL_TIME; ++t) {
+          eval_deme->SingleAdvance();
+          // Was there consensus?
+          if (eval_deme->max_vote_cnt == eval_deme->GetSize()) ++full_consensus_time;
+        }
+
+        // Compute some relevant information about deme performance.
+        // consensi.clear();
+        // TODO: Finish setting this up!
+
+      }
+
+    }
+
   }
 
   /// Dispatch straight to neighbor.
@@ -443,7 +506,7 @@ int main(int argc, char * argv[])
   std::cout << "|    How am I configured?    |" << std::endl;
   std::cout << "==============================" << std::endl;
   config.Write(std::cout);
-  std::cout << "==============================" << std::endl;
+  std::cout << "==============================\n" << std::endl;
 
   int RANDOM_SEED        = config.RANDOM_SEED();
   bool EVENT_DRIVEN      = true;
@@ -452,5 +515,6 @@ int main(int argc, char * argv[])
   size_t INBOX_CAPACITY  = 8;
 
   ConsensusExp e(RANDOM_SEED, EVENT_DRIVEN);
+
   std::cout << "Hello there!" << std::endl;
 }
