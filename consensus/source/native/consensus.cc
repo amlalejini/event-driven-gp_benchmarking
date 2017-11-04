@@ -1,8 +1,12 @@
 // This is the main function for the NATIVE version of this project.
 
 #include <iostream>
+#include <string>
 #include <deque>
 #include <unordered_set>
+#include <utility>
+#include <fstream>
+#include <sys/stat.h>
 
 #include "base/Ptr.h"
 #include "base/vector.h"
@@ -32,7 +36,7 @@ constexpr size_t DIR_RIGHT = 3;
 constexpr size_t MIN_UID = 1;
 constexpr size_t MAX_UID = 10000;
 
-/// Class to manage a concensus experiment.
+/// Class to manage a consensus experiment.
 ///  - Will be configured based on treatment parameters.
 class ConsensusExp {
 public:
@@ -56,6 +60,13 @@ public:
 
     Agent(const program_t & _p)
       : program(_p) { ; }
+
+    Agent(Agent && in)
+      : program(in.program),
+        full_consensus_time(in.full_consensus_time),
+        valid_votes(in.valid_votes),
+        max_consensus(in.max_consensus)
+    { ; }
 
     program_t & GetGenome() { return program; }
   };
@@ -109,7 +120,6 @@ public:
 
     void Reset() {
       germ_prog.Clear();
-      // TODO: reset traits!
       uids.clear(); // Reset UIDs.
       valid_votes.clear();
       max_vote_cnt = 0;
@@ -225,26 +235,35 @@ public:
 
 protected:
   // == Configurable experiment parameters ==
-  // TODO: PARAMETERIZE THIS STUFF! (using config system)
-  int RANDOM_SEED;        //< Random seed to use for this experiment.
-  bool EVENT_DRIVEN;      //< Is this consensus experiment event driven?
-  size_t DEME_WIDTH;      //< Width (in cells) of a deme. Deme size = deme width * deme height.
-  size_t DEME_HEIGHT;     //< Height (in cells) of a deme. Deme size = deme width * deme height.
-  size_t INBOX_CAPACITY;  //< Message inbox capacity for agents. Only relevant for imperative agents.
-  size_t DEME_CNT;        //< Population size. i.e. the number of demes in the population at each generation.
-  size_t GENERATIONS;     //< How many generations (iterations of evolution) should we run the experiment?
+  // General settings.
+  bool DEBUG_MODE;
+  int RANDOM_SEED;    //< Random seed to use for this experiment.
+  size_t DEME_CNT;    //< Population size. i.e. the number of demes in the population at each generation.
+  size_t GENERATIONS; //< How many generations (iterations of evolution) should we run the experiment?
+  std::string ANCESTOR_FPATH;
+  // Hardware-specific settings.
+  bool EVENT_DRIVEN;  //< Is this consensus experiment event driven?
+  size_t INBOX_CAPACITY; //< Message inbox capacity for agents. Only relevant for imperative agents.
+  size_t HW_MAX_CORES;
+  size_t HW_MAX_CALL_DEPTH;
+  double HW_MIN_BIND_THRESH;
+  // Deme-specific settings.
+  size_t DEME_WIDTH;  //< Width (in cells) of a deme. Deme size = deme width * deme height.
+  size_t DEME_HEIGHT; //< Height (in cells) of a deme. Deme size = deme width * deme height.
   size_t DEME_EVAL_TIME;       //< How long should each deme get to evaluate?
-
-  std::string ANCESTOR_FPATH;  //< Path to the ancestor to seed population with.
-
+  // Mutation-specific settings.
+  size_t PROG_MAX_FUNC_CNT;
+  size_t PROG_MAX_FUNC_LEN;
+  size_t PROG_MAX_ARG_VAL;
+  double PER_BIT__AFFINITY_FLIP_RATE;
+  double PER_INST__SUB_RATE;
+  double PER_FUNC__SLIP_RATE;
   double PER_FUNC__FUNC_DUP_RATE;
   double PER_FUNC__FUNC_DEL_RATE;
-  double PER_BIT__AFFINITY_FLIP_RATE;
-  double PER_FUNC__SLIP_RATE;
-  double PER_INST__SUB_RATE;
-  size_t PROG_MAX_FUNC_LEN;
-  size_t PROG_MAX_FUNC_CNT;
-  size_t PROG_MAX_ARG_VAL;
+  // Data output-specific settings.
+  size_t SYSTEMATICS_INTERVAL;
+  size_t POP_SNAPSHOT_INTERVAL;
+  std::string DATA_DIRECTORY;
 
 
   emp::Ptr<emp::Random> random;
@@ -260,27 +279,47 @@ protected:
   // std::unordered_multiset<size_t> consensi; //< Valid vote counts in a deme.
 
 public:
-  ConsensusExp(int _random_seed, bool _event_driven)
-    : RANDOM_SEED(_random_seed), EVENT_DRIVEN(_event_driven),
-      DEME_WIDTH(3), DEME_HEIGHT(3), INBOX_CAPACITY(8),
-      DEME_CNT(1), GENERATIONS(1), DEME_EVAL_TIME(8),
-      ANCESTOR_FPATH("ancestor.gp"),
-      affinity_table(emp::Pow2(AFFINITY_WIDTH))
+  ConsensusExp(const ConsensusConfig & config)
+    : affinity_table(emp::Pow2(AFFINITY_WIDTH))
   {
-    //TODO: switch to just passing in a config object to experiment.
-    // PER_FUNC__FUNC_DUP_RATE
-    // PER_FUNC__FUNC_DEL_RATE
-    // PER_BIT__AFFINITY_FLIP_RATE
-    // PER_FUNC__SLIP_RATE
-    // PER_INST__SUB_RATE
-    // PROG_MAX_FUNC_LEN
-    // PROG_MAX_FUNC_CNT
-    // PROG_MAX_ARG_VAL
+    // Fill out experiment parameters with config settings!
+    DEBUG_MODE = config.DEBUG_MODE();
+    RANDOM_SEED = config.RANDOM_SEED();
+    DEME_CNT = config.DEME_CNT();
+    GENERATIONS = config.GENERATIONS();
+    ANCESTOR_FPATH = config.ANCESTOR_FPATH();
+    EVENT_DRIVEN = config.EVENT_DRIVEN();
+    INBOX_CAPACITY = config.INBOX_CAPACITY();
+    HW_MAX_CORES = config.HW_MAX_CORES();
+    HW_MAX_CALL_DEPTH = config.HW_MAX_CALL_DEPTH();
+    HW_MIN_BIND_THRESH = config.HW_MIN_BIND_THRESH();
+    DEME_WIDTH = config.DEME_WIDTH();
+    DEME_HEIGHT = config.DEME_HEIGHT();
+    DEME_EVAL_TIME = config.DEME_EVAL_TIME();
+    PROG_MAX_FUNC_CNT = config.PROG_MAX_FUNC_CNT();
+    PROG_MAX_FUNC_LEN = config.PROG_MAX_FUNC_LEN();
+    PROG_MAX_ARG_VAL = config.PROG_MAX_ARG_VAL();
+    PER_BIT__AFFINITY_FLIP_RATE = config.PER_BIT__AFFINITY_FLIP_RATE();
+    PER_INST__SUB_RATE = config.PER_INST__SUB_RATE();
+    PER_FUNC__SLIP_RATE = config.PER_FUNC__SLIP_RATE();
+    PER_FUNC__FUNC_DUP_RATE = config.PER_FUNC__FUNC_DUP_RATE();
+    PER_FUNC__FUNC_DEL_RATE = config.PER_FUNC__FUNC_DEL_RATE();
+    SYSTEMATICS_INTERVAL = config.SYSTEMATICS_INTERVAL();
+    POP_SNAPSHOT_INTERVAL = config.POP_SNAPSHOT_INTERVAL();
+    DATA_DIRECTORY = config.DATA_DIRECTORY();
 
+    // Setup the output directory.
+    mkdir(DATA_DIRECTORY.c_str(), ACCESSPERMS);
+    if (DATA_DIRECTORY.back() != '/') DATA_DIRECTORY += '/';
+
+    // Make our random number generator.
     random = emp::NewPtr<emp::Random>(RANDOM_SEED);
+    // Make the world.
     world = emp::NewPtr<world_t>(random, "Consensus-World");
+    // Create empty instruction/event libraries.
     inst_lib = emp::NewPtr<inst_lib_t>();
     event_lib = emp::NewPtr<event_lib_t>();
+    // Create the deme that will be used to evaluate evolving programs.
     eval_deme = emp::NewPtr<Deme>(random, DEME_WIDTH, DEME_HEIGHT, INBOX_CAPACITY, inst_lib, event_lib);
 
     // Fill out our convenient affinity table.
@@ -356,6 +395,8 @@ public:
     }
 
     // TODO: Non-forking message handler?
+
+    // Configure the ancestor program.
     program_t ancestor_prog(inst_lib);
     std::ifstream ancestor_fstream(ANCESTOR_FPATH);
     if (!ancestor_fstream.is_open()) {
@@ -368,30 +409,27 @@ public:
     ancestor_prog.PrintProgramFull();
     std::cout << " -------------------------" << std::endl;
 
-
     // Configure the world.
     world->SetWellMixed(true);                 // Deme germs are well-mixed. (no need for keeping track of deme-deme spatial information)
     world->SetFitFun([this](Agent & agent) { return this->CalcFitness(agent); });
     world->SetMutFun([this](Agent & agent, emp::Random & rnd) { return this->Mutate(agent, rnd); });
-
     world->Inject(ancestor_prog, DEME_CNT);    // Inject a bunch of ancestor deme-germs into the population.
 
-    // for (size_t i = 0; i < world->GetSize(); ++i) {
-    //   std::cout << "####### i: " << i << " ########" << std::endl;
-    //   world->GetOrg(i).GetGenome().PrintProgramFull();
-    //   std::cout << std::endl;
-    // }
-    std::cout << "World size: " << world->GetSize() << std::endl;
+    // Setup the systematics output file.
+    auto & sys_file = world->SetupSystematicsFile(DATA_DIRECTORY + "systematics.csv");
+    sys_file.SetTimingRepeat(SYSTEMATICS_INTERVAL);
 
   }
 
   ~ConsensusExp() {
     world.Delete();
+    eval_deme.Delete();
+    inst_lib.Delete();
+    event_lib.Delete();
     random.Delete();
   }
 
   /// Run the experiment!
-  // TODO: data collection (during & at end of experiment)
   void Run() {
     // for (size_t ud = 0; ud < )
     size_t full_consensus_time = 0;
@@ -403,27 +441,64 @@ public:
         full_consensus_time = 0;            // Reset full consensus tracker.
         // Run the deme for some amount of time.
         for (size_t t = 0; t < DEME_EVAL_TIME; ++t) {
-          std::cout << "=============================== TIME: " << t << " ===============================" << std::endl;
+          // std::cout << "=============================== TIME: " << t << " ===============================" << std::endl;
           eval_deme->SingleAdvance();
           // Was there consensus?
           if (eval_deme->max_vote_cnt == eval_deme->GetSize()) ++full_consensus_time;
-          eval_deme->PrintState();
+          // eval_deme->PrintState();
         }
-        std::cout << "\n\n\nEval done. Summary stats:" << std::endl;
+        // std::cout << "\n\n\nEval done. Summary stats:" << std::endl;
         // Compute some relevant information about deme performance.
         Agent & agent = world->GetOrg(id);
         agent.max_consensus = eval_deme->max_vote_cnt;  // max vote count will have max consensus size at end of evaluation.
         agent.valid_votes = eval_deme->valid_votes.size(); // TODO: check to make sure this is what we're expecting.
         agent.full_consensus_time = full_consensus_time;
-        std::cout << "  Final max concensus: " << agent.max_consensus << std::endl;
-        std::cout << "  Final valid votes: " << agent.valid_votes << std::endl;
-        std::cout << "  Time at concensus: " << agent.full_consensus_time << std::endl;
+        // std::cout << "  Final max concensus: " << agent.max_consensus << std::endl;
+        // std::cout << "  Final valid votes: " << agent.valid_votes << std::endl;
+        // std::cout << "  Time at concensus: " << agent.full_consensus_time << std::endl;
       }
+
+      // Selection
+      // Keep the best program around.
+      emp::EliteSelect(*world, 1, 1);
+      // Run a tournament for the rest.
+      emp::TournamentSelect(*world, 8, DEME_CNT - 1);
+
+      // Update the world (generational turnover).
+      world->Update();
+
+      // Mutate everyone but the first (elite) agent.
+      world->DoMutations(1);
+
+      // Print out in-run summary stats on dominant agent from last generation (which will be the first one).
+      std::cout << "Update " << ud;
+      std::cout << ", Max score: " << CalcFitness(world->GetOrg(0)) << std::endl;
+      std::cout << "  Final max consensus: " << world->GetOrg(0).max_consensus << std::endl;
+      std::cout << "  Final valid votes: " << world->GetOrg(0).valid_votes << std::endl;
+      std::cout << "  Time at consensus: " << world->GetOrg(0).full_consensus_time << std::endl;
+
+      // Snapshot time?
+      if (ud % POP_SNAPSHOT_INTERVAL == 0) Snapshot(ud);
+    }
+  }
+
+  /// This function takes a snapshot of the world.
+  /// ...
+  void Snapshot(size_t update) {
+    std::string snapshot_dir = DATA_DIRECTORY + "pop_" + emp::to_string((int)update);
+    std::string prog_filename;
+    mkdir(snapshot_dir.c_str(), ACCESSPERMS);
+    // For each program in the population, dump the full program description.
+    for (size_t i = 0; i < world->GetSize(); ++i) {
+      Agent & agent = world->GetOrg(i);
+      std::ofstream prog_ofstream(snapshot_dir + "/prog_" + emp::to_string((int)i) + ".gp");
+      agent.program.PrintProgramFull(prog_ofstream);
+      prog_ofstream.close();
     }
   }
 
   double CalcFitness(Agent & agent) {
-    return (agent.valid_votes + agent.max_consensus + (agent.full_consensus_time * eval_deme->grid.size()));
+    return (double)(agent.valid_votes + agent.max_consensus + (agent.full_consensus_time * eval_deme->grid.size()));
   }
 
   /// Mutate organism function.
@@ -597,7 +672,8 @@ public:
   /// Description:
   static void Inst_SetOpinion(hardware_t & hw, const inst_t & inst) {
     state_t & state = hw.GetCurState();
-    hw.SetTrait(TRAIT_ID__OPINION, state.AccessLocal(inst.args[0]));
+    double val = state.AccessLocal(inst.args[0]);
+    if (val > 0) hw.SetTrait(TRAIT_ID__OPINION, (int)val);
   }
 
   /// Instruction: RetrieveMsg
@@ -638,14 +714,6 @@ int main(int argc, char * argv[])
   config.Write(std::cout);
   std::cout << "==============================\n" << std::endl;
 
-  int RANDOM_SEED        = config.RANDOM_SEED();
-  bool EVENT_DRIVEN      = true;
-  size_t DEME_WIDTH      = 5;
-  size_t DEME_HEIGHT     = 5;
-  size_t INBOX_CAPACITY  = 8;
-
-  ConsensusExp e(RANDOM_SEED, EVENT_DRIVEN);
+  ConsensusExp e(config);
   e.Run();
-
-  std::cout << "Hello there!" << std::endl;
 }
