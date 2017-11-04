@@ -182,6 +182,7 @@ public:
         size_t val = rnd->GetUInt(MIN_UID, MAX_UID);
         while (emp::Has(uids, val)) { val = rnd->GetUInt(MIN_UID, MAX_UID); }
         grid[i].SetTrait(TRAIT_ID__UID, val);
+        uids.emplace(val);
       }
     }
 
@@ -195,13 +196,27 @@ public:
       for (size_t i = 0; i < schedule.size(); ++i) {
         grid[schedule[i]].SingleProcess();
         // Has i voted for a valid agent?
-        size_t vote_i = (size_t)grid[schedule[i]].GetTrait(TRAIT_ID__OPINION));
-        if (emp::Has(uids, vote_i) {
+        size_t vote_i = (size_t)grid[schedule[i]].GetTrait(TRAIT_ID__OPINION);
+        if (emp::Has(uids, vote_i)) {
           // If so, add i's vote.
           valid_votes.emplace(vote_i);
           size_t cnt = valid_votes.count(vote_i);
           if (cnt > max_vote_cnt) max_vote_cnt = cnt;
         }
+      }
+    }
+
+    void PrintState(std::ostream & os=std::cout) {
+      os << "==== DEME STATE ====\n";
+      os << "  Total valid votes: " << valid_votes.size() << "\n";
+      os << "  Max consensus: " << max_vote_cnt << "\n";
+      os << "  Votes: ";
+      for (auto it = valid_votes.begin(); it != valid_votes.end(); ++it) {
+        std::cout << " {vote: " << *it << ", cnt: " << valid_votes.count(*it) << "}";
+      } os << "\n";
+      for (size_t i = 0; i < grid.size(); ++i) {
+        os << "--- Agent @ (" << GetLocX(i) << ", " << GetLocY(i) << ") ---\n";
+        grid[i].PrintState(os); os << "\n";
       }
     }
   };
@@ -219,7 +234,18 @@ protected:
   size_t DEME_CNT;        //< Population size. i.e. the number of demes in the population at each generation.
   size_t GENERATIONS;     //< How many generations (iterations of evolution) should we run the experiment?
   size_t DEME_EVAL_TIME;       //< How long should each deme get to evaluate?
+
   std::string ANCESTOR_FPATH;  //< Path to the ancestor to seed population with.
+
+  double PER_FUNC__FUNC_DUP_RATE;
+  double PER_FUNC__FUNC_DEL_RATE;
+  double PER_BIT__AFFINITY_FLIP_RATE;
+  double PER_FUNC__SLIP_RATE;
+  double PER_INST__SUB_RATE;
+  size_t PROG_MAX_FUNC_LEN;
+  size_t PROG_MAX_FUNC_CNT;
+  size_t PROG_MAX_ARG_VAL;
+
 
   emp::Ptr<emp::Random> random;
   emp::Ptr<world_t> world;
@@ -236,11 +262,21 @@ protected:
 public:
   ConsensusExp(int _random_seed, bool _event_driven)
     : RANDOM_SEED(_random_seed), EVENT_DRIVEN(_event_driven),
-      DEME_WIDTH(5), DEME_HEIGHT(5), INBOX_CAPACITY(8),
-      DEME_CNT(100), GENERATIONS(100), DEME_EVAL_TIME(256),
+      DEME_WIDTH(3), DEME_HEIGHT(3), INBOX_CAPACITY(8),
+      DEME_CNT(1), GENERATIONS(1), DEME_EVAL_TIME(8),
       ANCESTOR_FPATH("ancestor.gp"),
       affinity_table(emp::Pow2(AFFINITY_WIDTH))
   {
+    //TODO: switch to just passing in a config object to experiment.
+    // PER_FUNC__FUNC_DUP_RATE
+    // PER_FUNC__FUNC_DEL_RATE
+    // PER_BIT__AFFINITY_FLIP_RATE
+    // PER_FUNC__SLIP_RATE
+    // PER_INST__SUB_RATE
+    // PROG_MAX_FUNC_LEN
+    // PROG_MAX_FUNC_CNT
+    // PROG_MAX_ARG_VAL
+
     random = emp::NewPtr<emp::Random>(RANDOM_SEED);
     world = emp::NewPtr<world_t>(random, "Consensus-World");
     inst_lib = emp::NewPtr<inst_lib_t>();
@@ -335,6 +371,9 @@ public:
 
     // Configure the world.
     world->SetWellMixed(true);                 // Deme germs are well-mixed. (no need for keeping track of deme-deme spatial information)
+    world->SetFitFun([this](Agent & agent) { return this->CalcFitness(agent); });
+    world->SetMutFun([this](Agent & agent, emp::Random & rnd) { return this->Mutate(agent, rnd); });
+
     world->Inject(ancestor_prog, DEME_CNT);    // Inject a bunch of ancestor deme-germs into the population.
 
     // for (size_t i = 0; i < world->GetSize(); ++i) {
@@ -342,6 +381,7 @@ public:
     //   world->GetOrg(i).GetGenome().PrintProgramFull();
     //   std::cout << std::endl;
     // }
+    std::cout << "World size: " << world->GetSize() << std::endl;
 
   }
 
@@ -351,30 +391,120 @@ public:
   }
 
   /// Run the experiment!
+  // TODO: data collection (during & at end of experiment)
   void Run() {
     // for (size_t ud = 0; ud < )
     size_t full_consensus_time = 0;
     for (size_t ud = 0; ud < GENERATIONS; ++ud) {
       // Evaluate each agent.
-      for (size_t id = 0; world->GetSize(); ++id) {
+      for (size_t id = 0; id < world->GetSize(); ++id) {
         eval_deme->SetProgram(world->GetGenomeAt(id));  // Load agent's program onto evaluation deme.
         eval_deme->RandomizeUIDS();         // Randomize evaluation deme hardwares' UIDs.
         full_consensus_time = 0;            // Reset full consensus tracker.
         // Run the deme for some amount of time.
         for (size_t t = 0; t < DEME_EVAL_TIME; ++t) {
+          std::cout << "=============================== TIME: " << t << " ===============================" << std::endl;
           eval_deme->SingleAdvance();
           // Was there consensus?
           if (eval_deme->max_vote_cnt == eval_deme->GetSize()) ++full_consensus_time;
+          eval_deme->PrintState();
         }
-
+        std::cout << "\n\n\nEval done. Summary stats:" << std::endl;
         // Compute some relevant information about deme performance.
-        // consensi.clear();
-        // TODO: Finish setting this up!
-
+        Agent & agent = world->GetOrg(id);
+        agent.max_consensus = eval_deme->max_vote_cnt;  // max vote count will have max consensus size at end of evaluation.
+        agent.valid_votes = eval_deme->valid_votes.size(); // TODO: check to make sure this is what we're expecting.
+        agent.full_consensus_time = full_consensus_time;
+        std::cout << "  Final max concensus: " << agent.max_consensus << std::endl;
+        std::cout << "  Final valid votes: " << agent.valid_votes << std::endl;
+        std::cout << "  Time at concensus: " << agent.full_consensus_time << std::endl;
       }
-
     }
+  }
 
+  double CalcFitness(Agent & agent) {
+    return (agent.valid_votes + agent.max_consensus + (agent.full_consensus_time * eval_deme->grid.size()));
+  }
+
+  /// Mutate organism function.
+  /// Return number of mutation *events* that occur (e.g. function duplication, slip mutation are single events).
+  size_t Mutate(Agent & agent, emp::Random & rnd) {
+    program_t & program = agent.program;
+    size_t mut_cnt = 0;
+    // Duplicate a function?
+    if (rnd.P(PER_FUNC__FUNC_DUP_RATE) && program.GetSize() < PROG_MAX_FUNC_CNT) {
+      ++mut_cnt;
+      const uint32_t fID = rnd.GetUInt(program.GetSize());
+      program.PushFunction(program[fID]);
+    }
+    // Delete a function?
+    if (rnd.P(PER_FUNC__FUNC_DEL_RATE) && program.GetSize() > 1) {
+      ++mut_cnt;
+      const uint32_t fID = rnd.GetUInt(program.GetSize());
+      program[fID] = program[program.GetSize() - 1];
+      program.program.resize(program.GetSize() - 1);
+    }
+    // For each function...
+    for (size_t fID = 0; fID < program.GetSize(); ++fID) {
+      // Mutate affinity
+      for (size_t i = 0; i < program[fID].GetAffinity().GetSize(); ++i) {
+        affinity_t & aff = program[fID].GetAffinity();
+        if (rnd.P(PER_BIT__AFFINITY_FLIP_RATE)) {
+          ++mut_cnt;
+          aff.Set(i, !aff.Get(i));
+        }
+      }
+      // Slip-mutation?
+      if (rnd.P(PER_FUNC__SLIP_RATE)) {
+        uint32_t begin = rnd.GetUInt(program[fID].GetSize());
+        uint32_t end = rnd.GetUInt(program[fID].GetSize());
+        if (begin < end && ((program[fID].GetSize() + (end - begin)) < PROG_MAX_FUNC_LEN)) {
+          // duplicate begin:end
+          ++mut_cnt;
+          const size_t dup_size = end - begin;
+          const size_t new_size = program[fID].GetSize() + dup_size;
+          hardware_t::Function new_fun(program[fID].GetAffinity());
+          for (size_t i = 0; i < new_size; ++i) {
+            if (i < end) new_fun.PushInst(program[fID][i]);
+            else new_fun.PushInst(program[fID][i - dup_size]);
+          }
+          program[fID] = new_fun;
+        } else if (begin > end && ((program[fID].GetSize() - (begin - end)) >= 1)) {
+          // delete end:begin
+          ++mut_cnt;
+          hardware_t::Function new_fun(program[fID].GetAffinity());
+          for (size_t i = 0; i < end; ++i)
+            new_fun.PushInst(program[fID][i]);
+          for (size_t i = begin; i < program[fID].GetSize(); ++i)
+            new_fun.PushInst(program[fID][i]);
+          program[fID] = new_fun;
+        }
+      }
+      // Substitution mutations?
+      for (size_t i = 0; i < program[fID].GetSize(); ++i) {
+        inst_t & inst = program[fID][i];
+        // Mutate affinity (even if it doesn't have one).
+        for (size_t k = 0; k < inst.affinity.GetSize(); ++k) {
+          if (rnd.P(PER_BIT__AFFINITY_FLIP_RATE)) {
+            ++mut_cnt;
+            inst.affinity.Set(k, !inst.affinity.Get(k));
+          }
+        }
+        // Mutate instruction.
+        if (rnd.P(PER_INST__SUB_RATE)) {
+          ++mut_cnt;
+          inst.id = rnd.GetUInt(program.GetInstLib()->GetSize());
+        }
+        // Mutate arguments (even if they aren't relevent to instruction).
+        for (size_t k = 0; k < hardware_t::MAX_INST_ARGS; ++k) {
+          if (rnd.P(PER_INST__SUB_RATE)) {
+            ++mut_cnt;
+            inst.args[k] = rnd.GetInt(PROG_MAX_ARG_VAL);
+          }
+        }
+      }
+    }
+    return mut_cnt;
   }
 
   /// Dispatch straight to neighbor.
@@ -515,6 +645,7 @@ int main(int argc, char * argv[])
   size_t INBOX_CAPACITY  = 8;
 
   ConsensusExp e(RANDOM_SEED, EVENT_DRIVEN);
+  e.Run();
 
   std::cout << "Hello there!" << std::endl;
 }

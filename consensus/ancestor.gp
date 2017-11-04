@@ -1,8 +1,8 @@
 Fn-00000000:
   Nop
   Nop
-  Nop
-  Nop
+  GetUID(0)
+  SetOpinion(0)
   Nop
   Nop
   Nop
