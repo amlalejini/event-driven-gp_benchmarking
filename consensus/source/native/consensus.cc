@@ -59,9 +59,19 @@ public:
     size_t max_consensus;
 
     Agent(const program_t & _p)
-      : program(_p) { ; }
+      : program(_p),
+        full_consensus_time(0),
+        valid_votes(0), max_consensus(0)
+    { ; }
 
     Agent(Agent && in)
+      : program(in.program),
+        full_consensus_time(in.full_consensus_time),
+        valid_votes(in.valid_votes),
+        max_consensus(in.max_consensus)
+    { ; }
+
+    Agent(const Agent & in)
       : program(in.program),
         full_consensus_time(in.full_consensus_time),
         valid_votes(in.valid_votes),
@@ -316,6 +326,7 @@ public:
     random = emp::NewPtr<emp::Random>(RANDOM_SEED);
     // Make the world.
     world = emp::NewPtr<world_t>(random, "Consensus-World");
+    world->Reset();
     // Create empty instruction/event libraries.
     inst_lib = emp::NewPtr<inst_lib_t>();
     event_lib = emp::NewPtr<event_lib_t>();
@@ -416,8 +427,8 @@ public:
     world->Inject(ancestor_prog, DEME_CNT);    // Inject a bunch of ancestor deme-germs into the population.
 
     // Setup the systematics output file.
-    auto & sys_file = world->SetupSystematicsFile(DATA_DIRECTORY + "systematics.csv");
-    sys_file.SetTimingRepeat(SYSTEMATICS_INTERVAL);
+    // auto & sys_file = world->SetupSystematicsFile(DATA_DIRECTORY + "systematics.csv");
+    // sys_file.SetTimingRepeat(SYSTEMATICS_INTERVAL);
 
   }
 
@@ -431,10 +442,13 @@ public:
 
   /// Run the experiment!
   void Run() {
-    // for (size_t ud = 0; ud < )
     size_t full_consensus_time = 0;
-    for (size_t ud = 0; ud < GENERATIONS; ++ud) {
+    size_t best_agent = 0;
+    double best_score = 0;
+    for (size_t ud = 0; ud <= GENERATIONS; ++ud) {
       // Evaluate each agent.
+      best_agent = 0;
+      best_score = 0;
       for (size_t id = 0; id < world->GetSize(); ++id) {
         eval_deme->SetProgram(world->GetGenomeAt(id));  // Load agent's program onto evaluation deme.
         eval_deme->RandomizeUIDS();         // Randomize evaluation deme hardwares' UIDs.
@@ -445,17 +459,14 @@ public:
           eval_deme->SingleAdvance();
           // Was there consensus?
           if (eval_deme->max_vote_cnt == eval_deme->GetSize()) ++full_consensus_time;
-          // eval_deme->PrintState();
         }
-        // std::cout << "\n\n\nEval done. Summary stats:" << std::endl;
         // Compute some relevant information about deme performance.
         Agent & agent = world->GetOrg(id);
         agent.max_consensus = eval_deme->max_vote_cnt;  // max vote count will have max consensus size at end of evaluation.
         agent.valid_votes = eval_deme->valid_votes.size(); // TODO: check to make sure this is what we're expecting.
         agent.full_consensus_time = full_consensus_time;
-        // std::cout << "  Final max concensus: " << agent.max_consensus << std::endl;
-        // std::cout << "  Final valid votes: " << agent.valid_votes << std::endl;
-        // std::cout << "  Time at concensus: " << agent.full_consensus_time << std::endl;
+        double score = CalcFitness(agent);
+        if (score > best_score) { best_score = score; best_agent = id; }
       }
 
       // Selection
@@ -464,18 +475,28 @@ public:
       // Run a tournament for the rest.
       emp::TournamentSelect(*world, 8, DEME_CNT - 1);
 
+      // for (size_t id = 0; id < world->GetSize(); ++id) {
+      //   Agent & agent = world->GetOrg(id);
+      //   std::cout << "[Agent " << id << std::endl;
+      //   std::cout << "  Final max concensus: " << agent.max_consensus;
+      //   std::cout << "  Final valid votes: " << agent.valid_votes << std::endl;
+      //   std::cout << "  Time at concensus: " << agent.full_consensus_time << std::endl;
+      //   std::cout << "]" << std::endl;
+      // }
+      // std::cout << ".........UPDATING.........." << std::endl;
+
+      // Print out in-run summary stats on dominant agent from last generation (which will be the first one).
+      std::cout << "Update " << world->GetUpdate();
+      std::cout << ", Max score: " << best_score << std::endl;
+      std::cout << "    Final max consensus: " << world->GetOrg(best_agent).max_consensus << std::endl;
+      std::cout << "    Final valid votes: " << world->GetOrg(best_agent).valid_votes << std::endl;
+      std::cout << "    Time at consensus: " << world->GetOrg(best_agent).full_consensus_time << std::endl;
+
       // Update the world (generational turnover).
       world->Update();
 
       // Mutate everyone but the first (elite) agent.
       world->DoMutations(1);
-
-      // Print out in-run summary stats on dominant agent from last generation (which will be the first one).
-      std::cout << "Update " << ud;
-      std::cout << ", Max score: " << CalcFitness(world->GetOrg(0)) << std::endl;
-      std::cout << "  Final max consensus: " << world->GetOrg(0).max_consensus << std::endl;
-      std::cout << "  Final valid votes: " << world->GetOrg(0).valid_votes << std::endl;
-      std::cout << "  Time at consensus: " << world->GetOrg(0).full_consensus_time << std::endl;
 
       // Snapshot time?
       if (ud % POP_SNAPSHOT_INTERVAL == 0) Snapshot(ud);
@@ -498,7 +519,7 @@ public:
   }
 
   double CalcFitness(Agent & agent) {
-    return (double)(agent.valid_votes + agent.max_consensus + (agent.full_consensus_time * eval_deme->grid.size()));
+    return (double)(agent.valid_votes + agent.max_consensus + (agent.full_consensus_time * eval_deme->GetSize()));
   }
 
   /// Mutate organism function.
