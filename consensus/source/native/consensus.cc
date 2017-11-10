@@ -19,24 +19,25 @@
 
 #include "consensus-config.h"
 
-constexpr size_t AFFINITY_WIDTH = 16;
+constexpr size_t AFFINITY_WIDTH = 16;    //< How many bits make up each affinity?
 
-constexpr size_t TRAIT_ID__LOC     = 0;
-constexpr size_t TRAIT_ID__DIR     = 1;
-constexpr size_t TRAIT_ID__UID     = 2;
-constexpr size_t TRAIT_ID__OPINION = 3;
+// Hardware trait indices. Each of these constants is an index into EventDrivenGP/Signal GP's trait vector.
+constexpr size_t TRAIT_ID__LOC     = 0;  //< Trait ID that specifies hardware's location within deme grid.
+constexpr size_t TRAIT_ID__DIR     = 1;  //< Trait ID that specifies hardware's orientation.
+constexpr size_t TRAIT_ID__UID     = 2;  //< Trait ID that specifies hardware's unique identifer.
+constexpr size_t TRAIT_ID__OPINION = 3;  //< Trait ID that specifies hardware's current opinion.
 
-constexpr size_t NUM_NEIGHBORS = 4;
+constexpr size_t NUM_NEIGHBORS = 4;      //< Number of neighboring locations for each grid location in a deme.
 
+// Orientation idenifiers. I.e. 0 means up, 1 means left, etc.
 constexpr size_t DIR_UP = 0;
 constexpr size_t DIR_LEFT = 1;
 constexpr size_t DIR_DOWN = 2;
 constexpr size_t DIR_RIGHT = 3;
 
-constexpr size_t MIN_UID = 1;
-constexpr size_t MAX_UID = 10000;
-
-// TODO: more comments!
+// Min and max valid unique idenifiers. Used when generating unique idenifiers for virtual hardware.
+constexpr size_t MIN_UID = 1;           //< Minimum bound on hardware UID. NOTE: This should not overlap 0. A 0 is used to specify no-vote.
+constexpr size_t MAX_UID = 10000;       //< Maximum bound on hardware UID.
 
 /// Class to manage a consensus experiment.
 ///  - Will be configured based on treatment parameters.
@@ -53,11 +54,13 @@ public:
   using affinity_t = hardware_t::affinity_t;
 
   /// Struct to keep track of agents (target of evolution) for the Consensus experiment.
+  /// Each agent is defined by its program (i.e. its genotype). Agent struct also contains
+  /// some useful information about how the agent performed when evaluated.
   struct Agent {
-    program_t program;
-    size_t full_consensus_time;
-    size_t valid_votes;
-    size_t max_consensus;
+    program_t program;          //< EventDrivenGP::Program (i.e. the agent's genotype).
+    size_t full_consensus_time; //< How many deme updates was this agent's program able to maintain a full, valid concensus?
+    size_t valid_votes;         //< After evaluation, how many votes are valid? (Range: [0:DEME SIZE])
+    size_t max_consensus;       //< After evaluation, what is the largest valid consensus? (Range: [0:DEME SIZE])
 
     Agent(const program_t & _p)
       : program(_p),
@@ -79,29 +82,39 @@ public:
         max_consensus(in.max_consensus)
     { ; }
 
+    /// Required by Empirical's World.h.
     program_t & GetGenome() { return program; }
   };
 
   /// Struct to keep track of demes for the Consensus experiment.
+  /// Demes are toroidal grids of virtual hardware (EventDrivenGP/Signal GP).
+  /// Hardware programs are homogeneous (i.e. each hardware unit has the exact same program loaded onto it).
   struct Deme {
     using grid_t = emp::vector<hardware_t>;
     using inbox_t = std::deque<event_t>;
 
-    grid_t grid;
-    size_t width;
-    size_t height;
-    size_t inbox_capacity;
+    grid_t grid;            //< Toroidal grid of hardware (stored in a 1D vector).
+    size_t width;           //< Width of the toroidal grid.
+    size_t height;          //< Height of the toroidal grid.
+    size_t inbox_capacity;  //< Max inbox capacity of hardware (when using inbox message delivery).
 
-    emp::vector<size_t> schedule;
-    emp::vector<inbox_t> inboxes;
+    emp::vector<size_t> schedule; //< Utility vector to store order to give each hardware in the deme a CPU cycle on a single deme update.
+    emp::vector<inbox_t> inboxes; //< Inbox for each hardware in the deme.
 
-    std::unordered_set<size_t> uids;
-    std::unordered_multiset<size_t> valid_votes;
-    size_t max_vote_cnt;
+    std::unordered_set<size_t> uids;             //< Set of UIDs currently in use.
+    std::unordered_multiset<size_t> valid_votes; //< Maintains the number of valid votes present in the deme at the end of the most recent deme-update.
+    size_t max_vote_cnt;                         //< Highest vote count for any single valid UID.
 
-    emp::Ptr<emp::Random> rnd;
-    program_t germ_prog;
+    emp::Ptr<emp::Random> rnd;  //< Pointer to a random number generator. NOTE: Deme struct is not responsible for pointer cleanup.
+    program_t germ_prog;        //< Current program loaded onto deme hardware. Initialized to be empty.
 
+    /// Deme construction requires:
+    ///  _rnd: pointer to random number generator (deme does not claim cleanup responsibility)
+    ///  _w: deme width
+    ///  _h: deme height
+    ///  _ibox_cap: inbox capacity
+    ///  _ilib: pointer to the instruction library that hardware will use. NOTE: Deme struct is not responsible for pointer cleanup.
+    ///  _elib: pointer to event library that hardware will use. NOTE: Deme struct is not responsible for pointer cleanup.
     Deme(emp::Ptr<emp::Random> _rnd, size_t _w, size_t _h, size_t _ibox_cap, emp::Ptr<inst_lib_t> _ilib, emp::Ptr<event_lib_t> _elib)
       : grid(), width(_w), height(_h), inbox_capacity(_ibox_cap),
         schedule(width*height), inboxes(width*height),
@@ -112,12 +125,13 @@ public:
       for (size_t i = 0; i < width * height; ++i) {
         grid.emplace_back(_ilib, _elib, rnd);
         schedule[i] = i;
-        uids.emplace(i);
+        uids.emplace(i+1);  // i+1 to avoid giving out a UID of zero.
         hardware_t & cpu = grid.back();
+        // Set hardware traits to valid initial values.
         cpu.SetTrait(TRAIT_ID__LOC, i);
-        cpu.SetTrait(TRAIT_ID__DIR, 0);
-        cpu.SetTrait(TRAIT_ID__UID, i);
-        cpu.SetTrait(TRAIT_ID__OPINION, 0); // Opinion of 0 implies that no opinion was set.
+        cpu.SetTrait(TRAIT_ID__DIR, 0);       // We'll start everyone out facing up.
+        cpu.SetTrait(TRAIT_ID__UID, i+1);     // i+1 to avoid giving out a UID of zero.
+        cpu.SetTrait(TRAIT_ID__OPINION, 0);   // Opinion of 0 implies that no opinion was set.
       }
     }
 
@@ -126,22 +140,31 @@ public:
       grid.clear();
     }
 
+    /// Reset the deme.
+    /// Reset everything! After this, deme hardware has no valid program loaded onto it.
+    /// Will want to use SetProgram function before trying to run the deme.
     void Reset() {
       germ_prog.Clear();
-      uids.clear(); // Reset UIDs.
+      uids.clear();
       valid_votes.clear();
       max_vote_cnt = 0;
       for (size_t i = 0; i < grid.size(); ++i) {
-        schedule[i] = i;  // Rejigger the schedule.
-        uids.emplace(i);  // UID = grid ID
+        schedule[i] = i;          // Re-jigger the schedule ordering.
+        uids.emplace(i+1);        // UID = grid ID + 1; +1 to avoid giving out a UID of zero.
         grid[i].ResetHardware();  // Reset CPU hardware and traits (below).
         grid[i].SetTrait(TRAIT_ID__LOC, i);
         grid[i].SetTrait(TRAIT_ID__DIR, 0);
-        grid[i].SetTrait(TRAIT_ID__UID, i);
+        grid[i].SetTrait(TRAIT_ID__UID, i+1);
         grid[i].SetTrait(TRAIT_ID__OPINION, 0);
       }
     }
 
+    /// Load a new program (_germ) onto all hardware in the deme.
+    /// NOTE: This function will completely reset the deme before loading the new program onto each
+    ///       hardware unit. That means you'll reset the cores, shared memories, event queues,
+    ///       traits, etc. of each hardware unit in the deme. Once the new program is loaded, this
+    ///       function takes care of putting all hardware units back into a valid execution state (i.e.
+    ///       it'll spawn a main core post-load).
     void SetProgram(const program_t & _germ) {
       Reset();
       germ_prog = _germ;
@@ -151,18 +174,24 @@ public:
       }
     }
 
+    /// Hardware configuration option.
+    /// Set the maximum number of cores on all hardware units in this deme.
     void SetHardwareMaxCores(size_t max_cores) {
       for (size_t i = 0; i < grid.size(); ++i) {
         grid[i].SetMaxCores(max_cores);
       }
     }
 
+    /// Hardware configuration option.
+    /// Set the maximum call depth of all hardware units in this deme.
     void SetHardwareMaxCallDepth(size_t max_depth) {
       for (size_t i = 0; i < grid.size(); ++i) {
         grid[i].SetMaxCallDepth(max_depth);
       }
     }
 
+    /// Hardware configuration option.
+    /// Set the minimum binding threshold (for Calls, event handling, etc.) for all hardware units in this deme.
     void SetHardwareMinBindThresh(double threshold) {
       for (size_t i = 0; i < grid.size(); ++i) {
         grid[i].SetMinBindThresh(threshold);
