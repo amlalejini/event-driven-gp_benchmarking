@@ -36,6 +36,8 @@ constexpr size_t DIR_RIGHT = 3;
 constexpr size_t MIN_UID = 1;
 constexpr size_t MAX_UID = 10000;
 
+// TODO: more comments!
+
 /// Class to manage a consensus experiment.
 ///  - Will be configured based on treatment parameters.
 class ConsensusExp {
@@ -49,7 +51,6 @@ public:
   using event_lib_t = hardware_t::event_lib_t;
   using memory_t = hardware_t::memory_t;
   using affinity_t = hardware_t::affinity_t;
-
 
   /// Struct to keep track of agents (target of evolution) for the Consensus experiment.
   struct Agent {
@@ -117,9 +118,6 @@ public:
         cpu.SetTrait(TRAIT_ID__DIR, 0);
         cpu.SetTrait(TRAIT_ID__UID, i);
         cpu.SetTrait(TRAIT_ID__OPINION, 0); // Opinion of 0 implies that no opinion was set.
-        // Configure CPU
-        // cpu.SetMinBind();
-        //
       }
     }
 
@@ -150,6 +148,24 @@ public:
       for (size_t i = 0; i < grid.size(); ++i) {
         grid[i].SetProgram(germ_prog);
         grid[i].SpawnCore(0, memory_t(), true);
+      }
+    }
+
+    void SetHardwareMaxCores(size_t max_cores) {
+      for (size_t i = 0; i < grid.size(); ++i) {
+        grid[i].SetMaxCores(max_cores);
+      }
+    }
+
+    void SetHardwareMaxCallDepth(size_t max_depth) {
+      for (size_t i = 0; i < grid.size(); ++i) {
+        grid[i].SetMaxCallDepth(max_depth);
+      }
+    }
+
+    void SetHardwareMinBindThresh(double threshold) {
+      for (size_t i = 0; i < grid.size(); ++i) {
+        grid[i].SetMinBindThresh(threshold);
       }
     }
 
@@ -254,6 +270,7 @@ protected:
   // Hardware-specific settings.
   bool EVENT_DRIVEN;  //< Is this consensus experiment event driven?
   size_t INBOX_CAPACITY; //< Message inbox capacity for agents. Only relevant for imperative agents.
+  bool FORK_ON_MESSAGE;
   size_t HW_MAX_CORES;
   size_t HW_MAX_CALL_DEPTH;
   double HW_MIN_BIND_THRESH;
@@ -275,7 +292,6 @@ protected:
   size_t POP_SNAPSHOT_INTERVAL;
   std::string DATA_DIRECTORY;
 
-
   emp::Ptr<emp::Random> random;
   emp::Ptr<world_t> world;
 
@@ -285,8 +301,6 @@ protected:
   emp::Ptr<Deme> eval_deme;
 
   emp::vector<affinity_t> affinity_table;
-
-  // std::unordered_multiset<size_t> consensi; //< Valid vote counts in a deme.
 
 public:
   ConsensusExp(const ConsensusConfig & config)
@@ -300,6 +314,7 @@ public:
     ANCESTOR_FPATH = config.ANCESTOR_FPATH();
     EVENT_DRIVEN = config.EVENT_DRIVEN();
     INBOX_CAPACITY = config.INBOX_CAPACITY();
+    FORK_ON_MESSAGE = config.FORK_ON_MESSAGE();
     HW_MAX_CORES = config.HW_MAX_CORES();
     HW_MAX_CALL_DEPTH = config.HW_MAX_CALL_DEPTH();
     HW_MIN_BIND_THRESH = config.HW_MIN_BIND_THRESH();
@@ -324,14 +339,20 @@ public:
 
     // Make our random number generator.
     random = emp::NewPtr<emp::Random>(RANDOM_SEED);
+
     // Make the world.
     world = emp::NewPtr<world_t>(random, "Consensus-World");
     world->Reset();
+
     // Create empty instruction/event libraries.
     inst_lib = emp::NewPtr<inst_lib_t>();
     event_lib = emp::NewPtr<event_lib_t>();
+
     // Create the deme that will be used to evaluate evolving programs.
     eval_deme = emp::NewPtr<Deme>(random, DEME_WIDTH, DEME_HEIGHT, INBOX_CAPACITY, inst_lib, event_lib);
+    eval_deme->SetHardwareMinBindThresh(HW_MIN_BIND_THRESH);
+    eval_deme->SetHardwareMaxCores(HW_MAX_CORES);
+    eval_deme->SetHardwareMaxCallDepth(HW_MAX_CALL_DEPTH);
 
     // Fill out our convenient affinity table.
     for (size_t i = 0; i < affinity_table.size(); ++i) {
@@ -377,11 +398,16 @@ public:
     inst_lib->AddInst("BroadcastMsg", Inst_BroadcastMsg, 0, "Broadcast output memory as message event.", emp::ScopeType::BASIC, 0, {"affinity"});
     // Consensus-specific instructions:
     inst_lib->AddInst("GetUID", Inst_GetUID, 1, "LocalReg[Arg1] = Trait[UID]");
-    inst_lib->AddInst("SetOpinion", Inst_SetOpinion, 1, "Trait[UID] = LocalReg[UID]");
-
+    inst_lib->AddInst("SetOpinion", Inst_SetOpinion, 1, "Trait[Opinion] = LocalReg[Arg1]");
     // - Setup event library. -
-    event_lib->AddEvent("MessageFacing", HandleEvent_MessageForking, "Event for messaging neighbors.");
-    event_lib->AddEvent("MessageBroadcast", HandleEvent_MessageForking, "Event for broadcasting a message.");
+    if (FORK_ON_MESSAGE) {
+      event_lib->AddEvent("MessageFacing", HandleEvent_MessageForking, "Event for messaging neighbors.");
+      event_lib->AddEvent("MessageBroadcast", HandleEvent_MessageForking, "Event for broadcasting a message.");
+    } else {
+      inst_lib->AddInst("Fork", Inst_Fork, 0, "Fork a new thread. Local memory contents of callee are loaded into forked thread's input memory.", emp::ScopeType::BASIC, 0, {"affinity"});
+      event_lib->AddEvent("MessageFacing", HandleEvent_MessageNonForking, "Event for messaging neighbors.");
+      event_lib->AddEvent("MessageBroadcast", HandleEvent_MessageNonForking, "Event for broadcasting a message.");
+    }
 
     // - Setup event-driven vs. imperative differences. -
     if (EVENT_DRIVEN) {
@@ -401,11 +427,9 @@ public:
         this->Imperative__DispatchMessageFacing(hw, event);
       });
       event_lib->RegisterDispatchFun("MessageBroadcast", [this](hardware_t & hw, const event_t & event) {
-        this->EventDriven__DispatchMessageBroadcast(hw, event);
+        this->Imperative__DispatchMessageBroadcast(hw, event);
       });
     }
-
-    // TODO: Non-forking message handler?
 
     // Configure the ancestor program.
     program_t ancestor_prog(inst_lib);
@@ -427,8 +451,8 @@ public:
     world->Inject(ancestor_prog, DEME_CNT);    // Inject a bunch of ancestor deme-germs into the population.
 
     // Setup the systematics output file.
-    // auto & sys_file = world->SetupSystematicsFile(DATA_DIRECTORY + "systematics.csv");
-    // sys_file.SetTimingRepeat(SYSTEMATICS_INTERVAL);
+    auto & sys_file = world->SetupSystematicsFile(DATA_DIRECTORY + "systematics.csv");
+    sys_file.SetTimingRepeat(SYSTEMATICS_INTERVAL);
 
   }
 
@@ -469,21 +493,11 @@ public:
         if (score > best_score) { best_score = score; best_agent = id; }
       }
 
-      // Selection
+      // Selection (nothing particularly interesting here).
       // Keep the best program around.
       emp::EliteSelect(*world, 1, 1);
       // Run a tournament for the rest.
       emp::TournamentSelect(*world, 8, DEME_CNT - 1);
-
-      // for (size_t id = 0; id < world->GetSize(); ++id) {
-      //   Agent & agent = world->GetOrg(id);
-      //   std::cout << "[Agent " << id << std::endl;
-      //   std::cout << "  Final max concensus: " << agent.max_consensus;
-      //   std::cout << "  Final valid votes: " << agent.valid_votes << std::endl;
-      //   std::cout << "  Time at concensus: " << agent.full_consensus_time << std::endl;
-      //   std::cout << "]" << std::endl;
-      // }
-      // std::cout << ".........UPDATING.........." << std::endl;
 
       // Print out in-run summary stats on dominant agent from last generation (which will be the first one).
       std::cout << "Update " << world->GetUpdate();
@@ -697,6 +711,13 @@ public:
     if (val > 0) hw.SetTrait(TRAIT_ID__OPINION, (int)val);
   }
 
+  /// Instruction:
+  /// Description: Fork thread with local memory as new thread's input buffer.
+  static void Inst_Fork(hardware_t & hw, const inst_t & inst) {
+    state_t & state = hw.GetCurState();
+    hw.SpawnCore(inst.affinity, hw.GetMinBindThresh(), state.local_mem);
+  }
+
   /// Instruction: RetrieveMsg
   /// Description:
   void Inst_RetrieveMsg(hardware_t hw, const inst_t & inst) {
@@ -708,22 +729,24 @@ public:
   }
 
   // ============== Some event handlers used in this experiment: ==============
-  static void HandleEvent_MessageForking(hardware_t & hw, const event_t event) {
+  static void HandleEvent_MessageForking(hardware_t & hw, const event_t & event) {
     // Spawn a new core.
     hw.SpawnCore(event.affinity, hw.GetMinBindThresh(), event.msg);
   }
 
-  // TODO: non-forking version of handle event?
+  static void HandleEvent_MessageNonForking(hardware_t & hw, const event_t & event) {
+    // Instead of spawning a new core. Load event data into input buffer of current call state.
+    state_t & state = hw.GetCurState();
+    // Loop through event memory....
+    for (auto mem : event.msg) { state.SetInput(mem.first, mem.second); }
+  }
 
 };
 
 int main(int argc, char * argv[])
 {
-  // TODO: Create/configure consensus experiment.
   std::string config_fname = "configs.cfg";
-
   auto args = emp::cl::ArgManager(argc, argv);
-
   ConsensusConfig config;
   config.Read(config_fname);
   if (args.ProcessConfigOptions(config, std::cout, config_fname, "consensus-config.h") == false) exit(0);
