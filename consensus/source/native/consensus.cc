@@ -204,8 +204,13 @@ public:
     size_t GetHeight() const { return height; }
     size_t GetSize() const { return grid.size(); }
 
+    /// Get x location in deme grid given hardware loc ID.
     size_t GetLocX(size_t id) const { return id % width; }
+
+    /// Get Y location in deme grid given hardware loc ID.
     size_t GetLocY(size_t id) const { return id / width; }
+
+    /// Get loc ID of hardware given an x, y position.
     size_t GetID(size_t x, size_t y) const { return (y * width) + x; }
 
     /// Get location adjacent to ID in direction dir.
@@ -224,6 +229,7 @@ public:
       return GetID(facing_x, facing_y);
     }
 
+    /// Get neighbor ID faced by hardware unit specified by id.
     size_t GetFacing(size_t id) const { return GetNeighbor(id, (size_t)grid[id].GetTrait(TRAIT_ID__DIR)); }
 
     bool InboxFull(size_t id) const { return inboxes[id].size() >= inbox_capacity; }
@@ -237,7 +243,8 @@ public:
       inboxes[id].emplace_back(event);
     }
 
-    /// Randomize unique identifiers for each agent.
+    /// Randomize unique identifiers for each agent (range of each: [MIN_UID:MAX_UID]). Function
+    /// ensures uniqueness.
     void RandomizeUIDS() {
       emp_assert(MAX_UID - MIN_UID > grid.size());
       uids.clear();
@@ -251,8 +258,12 @@ public:
       }
     }
 
+    /// Advance deme by t timesteps. For each timestep, do a single advance of deme.
     void Advance(size_t t = 1) { for (size_t i = 0; i < t; ++i) SingleAdvance(); }
 
+    /// Advance deme by a single timestep.
+    /// Hardware scheduling order is shuffled at the beginning of a timestep.
+    /// valid_votes and max_vote_cnt are updated for the single timestep.
     void SingleAdvance() {
       emp::Shuffle(*rnd, schedule); // Shuffle the schedule.
       valid_votes.clear();
@@ -271,6 +282,8 @@ public:
       }
     }
 
+    /// Prints the states of all hardware in the deme along with some voting information.
+    /// This function is primarily for debugging.
     void PrintState(std::ostream & os=std::cout) {
       os << "==== DEME STATE ====\n";
       os << "  Total valid votes: " << valid_votes.size() << "\n";
@@ -291,22 +304,22 @@ public:
 protected:
   // == Configurable experiment parameters ==
   // General settings.
-  bool DEBUG_MODE;
+  bool DEBUG_MODE;    //< Are we in debug mode? NOTE: Currenly not in use.
   int RANDOM_SEED;    //< Random seed to use for this experiment.
   size_t DEME_CNT;    //< Population size. i.e. the number of demes in the population at each generation.
   size_t GENERATIONS; //< How many generations (iterations of evolution) should we run the experiment?
-  std::string ANCESTOR_FPATH;
+  std::string ANCESTOR_FPATH; //< File path to ancestor program description.
   // Hardware-specific settings.
-  bool EVENT_DRIVEN;  //< Is this consensus experiment event driven?
-  size_t INBOX_CAPACITY; //< Message inbox capacity for agents. Only relevant for imperative agents.
-  bool FORK_ON_MESSAGE;
-  size_t HW_MAX_CORES;
-  size_t HW_MAX_CALL_DEPTH;
-  double HW_MIN_BIND_THRESH;
+  bool EVENT_DRIVEN;         //< Is this consensus experiment event driven?
+  size_t INBOX_CAPACITY;     //< Message inbox capacity for agents. Only relevant for imperative agents.
+  bool FORK_ON_MESSAGE;      //< Should we fork a new process in a hardware unit when it handles a message?
+  size_t HW_MAX_CORES;       //< Max number of hardware cores. i.e. max number of simultaneous threads of execution hardware will support.
+  size_t HW_MAX_CALL_DEPTH;  //< Max call depth of hardware unit.
+  double HW_MIN_BIND_THRESH; //< Hardware minimum binding threshold.
   // Deme-specific settings.
-  size_t DEME_WIDTH;  //< Width (in cells) of a deme. Deme size = deme width * deme height.
-  size_t DEME_HEIGHT; //< Height (in cells) of a deme. Deme size = deme width * deme height.
-  size_t DEME_EVAL_TIME;       //< How long should each deme get to evaluate?
+  size_t DEME_WIDTH;      //< Width (in cells) of a deme. Deme size = deme width * deme height.
+  size_t DEME_HEIGHT;     //< Height (in cells) of a deme. Deme size = deme width * deme height.
+  size_t DEME_EVAL_TIME;  //< How long should each deme get to evaluate?
   // Mutation-specific settings.
   size_t PROG_MAX_FUNC_CNT;
   size_t PROG_MAX_FUNC_LEN;
@@ -317,19 +330,19 @@ protected:
   double PER_FUNC__FUNC_DUP_RATE;
   double PER_FUNC__FUNC_DEL_RATE;
   // Data output-specific settings.
-  size_t SYSTEMATICS_INTERVAL;
-  size_t POP_SNAPSHOT_INTERVAL;
-  std::string DATA_DIRECTORY;
+  size_t SYSTEMATICS_INTERVAL;    //< Interval to save summary statistics.
+  size_t POP_SNAPSHOT_INTERVAL;   //< Interval to take full program snapshots of population.
+  std::string DATA_DIRECTORY;     //< Directory in which to store all program output.
 
-  emp::Ptr<emp::Random> random;
-  emp::Ptr<world_t> world;
+  emp::Ptr<emp::Random> random;   //< Random number generator. Exp class is responsible for allocation and deallocation.
+  emp::Ptr<world_t> world;        //< Empirical world object. Exp class is responsible for allocation and deallocation.
 
-  emp::Ptr<inst_lib_t> inst_lib;
-  emp::Ptr<event_lib_t> event_lib;
+  emp::Ptr<inst_lib_t> inst_lib;   //< Empirical hardware instruction library. Exp class is responsible for allocation and deallocation.
+  emp::Ptr<event_lib_t> event_lib; //< Empirical hardware event library. Exp class is responsible for allocation and deallocation.
 
-  emp::Ptr<Deme> eval_deme;
+  emp::Ptr<Deme> eval_deme;  //< We'll use a single deme to serially evaluate everyone in the evolving population every generation.
 
-  emp::vector<affinity_t> affinity_table;
+  emp::vector<affinity_t> affinity_table; //< Convenient table of affinities. (primarily used in debugging)
 
 public:
   ConsensusExp(const ConsensusConfig & config)
@@ -379,6 +392,7 @@ public:
 
     // Create the deme that will be used to evaluate evolving programs.
     eval_deme = emp::NewPtr<Deme>(random, DEME_WIDTH, DEME_HEIGHT, INBOX_CAPACITY, inst_lib, event_lib);
+    // Do some hardware configuration in the deme.
     eval_deme->SetHardwareMinBindThresh(HW_MIN_BIND_THRESH);
     eval_deme->SetHardwareMaxCores(HW_MAX_CORES);
     eval_deme->SetHardwareMaxCallDepth(HW_MAX_CALL_DEPTH);
@@ -428,7 +442,8 @@ public:
     // Consensus-specific instructions:
     inst_lib->AddInst("GetUID", Inst_GetUID, 1, "LocalReg[Arg1] = Trait[UID]");
     inst_lib->AddInst("SetOpinion", Inst_SetOpinion, 1, "Trait[Opinion] = LocalReg[Arg1]");
-    // - Setup event library. -
+
+    // Are we forking on a message or not? All that changes are the message event handlers.
     if (FORK_ON_MESSAGE) {
       event_lib->AddEvent("MessageFacing", HandleEvent_MessageForking, "Event for messaging neighbors.");
       event_lib->AddEvent("MessageBroadcast", HandleEvent_MessageForking, "Event for broadcasting a message.");
@@ -439,6 +454,9 @@ public:
     }
 
     // - Setup event-driven vs. imperative differences. -
+    // Primary difference: message dispatchers.
+    // Imperative/procedural runs will make use of the message inbox and need the extra RetrieveMsg
+    // instruction.
     if (EVENT_DRIVEN) {
       // Event-driven-specific.
       event_lib->RegisterDispatchFun("MessageFacing", [this](hardware_t & hw, const event_t & event) {
@@ -495,7 +513,7 @@ public:
 
   /// Run the experiment!
   void Run() {
-    size_t full_consensus_time = 0;
+    size_t full_consensus_time = 0; // These are used for printing summary information about each update to std out.
     size_t best_agent = 0;
     double best_score = 0;
     for (size_t ud = 0; ud <= GENERATIONS; ++ud) {
@@ -547,7 +565,7 @@ public:
   }
 
   /// This function takes a snapshot of the world.
-  /// ...
+  /// Prints out the full programs of every agent in the population in a form that can be accurately reloaded.
   void Snapshot(size_t update) {
     std::string snapshot_dir = DATA_DIRECTORY + "pop_" + emp::to_string((int)update);
     std::string prog_filename;
@@ -561,6 +579,10 @@ public:
     }
   }
 
+  /// Compute fitness of given agent. Assumes that agent has been evaluated already and that its
+  /// full_consensus_time, valid_votes, max_consensus member variables have been appropriately filled out.
+  /// Agent fitness = valid votes at end of evaluation + max consensus at end of evaluation +
+  ///                 (number of deme updates where a full, valid consensus was maintained * deme size)
   double CalcFitness(Agent & agent) {
     return (double)(agent.valid_votes + agent.max_consensus + (agent.full_consensus_time * eval_deme->GetSize()));
   }
@@ -646,20 +668,23 @@ public:
     return mut_cnt;
   }
 
-  /// Dispatch straight to neighbor.
+  /// Dispatch straight to faced neighbor.
+  /// NOTE: needs access to eval_deme to know who neighbors are.
   void EventDriven__DispatchMessageFacing(hardware_t hw, const event_t & event) {
     const size_t facing_id = eval_deme->GetFacing((size_t)hw.GetTrait(TRAIT_ID__LOC));
     hardware_t & rHW = eval_deme->GetHardware(facing_id);
     rHW.QueueEvent(event);
   }
 
-  /// Dispatch to neighbor's inbox.
+  /// Dispatch to faced neighbor's inbox.
+  /// NOTE: needs access to eval_deme to know who neighbors are.
   void Imperative__DispatchMessageFacing(hardware_t hw, const event_t & event) {
     const size_t facing_id = eval_deme->GetFacing((size_t)hw.GetTrait(TRAIT_ID__LOC));
     eval_deme->DeliverToInbox(facing_id, event);
   }
 
-  /// Dispatch to all neighbors.
+  /// Dispatch to all of hw's neighbors.
+  /// NOTE: needs access to eval_deme to know who neighbors are.
   void EventDriven__DispatchMessageBroadcast(hardware_t hw, const event_t & event) {
     const size_t loc_id = (size_t)hw.GetTrait(TRAIT_ID__LOC);
     eval_deme->GetHardware(eval_deme->GetNeighbor(loc_id, DIR_UP)).QueueEvent(event);
@@ -668,7 +693,8 @@ public:
     eval_deme->GetHardware(eval_deme->GetNeighbor(loc_id, DIR_LEFT)).QueueEvent(event);
   }
 
-  /// Dispatch to all neighbors' inbox.
+  /// Dispatch to all neighbors' inboxes.
+  /// NOTE: needs access to eval_deme to know who neighbors are.
   void Imperative__DispatchMessageBroadcast(hardware_t hw, const event_t & event) {
     const size_t loc_id = (size_t)hw.GetTrait(TRAIT_ID__LOC);
     eval_deme->DeliverToInbox(eval_deme->GetNeighbor(loc_id, DIR_UP), event);
@@ -719,28 +745,28 @@ public:
   }
 
   /// Instruction: BroadcastMsg
-  /// Description:
+  /// Description: Broadcast a message to all neighbors.
   static void Inst_BroadcastMsg(hardware_t & hw, const inst_t & inst) {
     state_t & state = hw.GetCurState();
     hw.TriggerEvent("MessageBroadcast", inst.affinity, state.output_mem, {"broadcast"});
   }
 
-  /// Instruction:
-  /// Description:
+  /// Instruction: GetUID
+  /// Description: Local[Arg1] = Trait[UID]
   static void Inst_GetUID(hardware_t & hw, const inst_t & inst) {
     state_t & state = hw.GetCurState();
     state.SetLocal(inst.args[0], hw.GetTrait(TRAIT_ID__UID));
   }
 
-  /// Instruction:
-  /// Description:
+  /// Instruction: SetOpinion
+  /// Description: Trait[Opinion] = Local[Arg1]
   static void Inst_SetOpinion(hardware_t & hw, const inst_t & inst) {
     state_t & state = hw.GetCurState();
     double val = state.AccessLocal(inst.args[0]);
     if (val > 0) hw.SetTrait(TRAIT_ID__OPINION, (int)val);
   }
 
-  /// Instruction:
+  /// Instruction: Fork
   /// Description: Fork thread with local memory as new thread's input buffer.
   static void Inst_Fork(hardware_t & hw, const inst_t & inst) {
     state_t & state = hw.GetCurState();
@@ -748,7 +774,9 @@ public:
   }
 
   /// Instruction: RetrieveMsg
-  /// Description:
+  /// Description: Retrieve a message from the hardware's associated message inbox if there is a message
+  ///              to be retrieved. Used in procedural representation runs.
+  /// NOTE: needs access to eval_deme for message inboxes.
   void Inst_RetrieveMsg(hardware_t hw, const inst_t & inst) {
     const size_t loc_id = (size_t)hw.GetTrait(TRAIT_ID__LOC);
     if (!eval_deme->InboxEmpty(loc_id)) {
@@ -758,11 +786,16 @@ public:
   }
 
   // ============== Some event handlers used in this experiment: ==============
+
+  /// Event handler: MessageForking
+  /// Description: Handles a message by spawning a new core with event data.
   static void HandleEvent_MessageForking(hardware_t & hw, const event_t & event) {
     // Spawn a new core.
     hw.SpawnCore(event.affinity, hw.GetMinBindThresh(), event.msg);
   }
 
+  /// Event handler: MessageNonForking
+  /// Description: Handles a message by loading event contents into local memory buffer.
   static void HandleEvent_MessageNonForking(hardware_t & hw, const event_t & event) {
     // Instead of spawning a new core. Load event data into input buffer of current call state.
     state_t & state = hw.GetCurState();
@@ -774,6 +807,7 @@ public:
 
 int main(int argc, char * argv[])
 {
+  // Read configs.
   std::string config_fname = "configs.cfg";
   auto args = emp::cl::ArgManager(argc, argv);
   ConsensusConfig config;
@@ -787,6 +821,7 @@ int main(int argc, char * argv[])
   config.Write(std::cout);
   std::cout << "==============================\n" << std::endl;
 
+  // Create experiment with configs, then run it!
   ConsensusExp e(config);
   e.Run();
 }
