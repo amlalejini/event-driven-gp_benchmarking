@@ -1,17 +1,17 @@
 #!/bin/bash -login
 
 ### Configure job:
-#PBS -l walltime=00:00:01:00
+#PBS -l walltime=04:00:00:00
 #PBS -l feature=intel16
 #PBS -l mem=4gb
-#PBS -t 1-100
-#PBS -N EventDriven_MsgForking
+#PBS -t 201-300
+#PBS -N Imperative_MsgNonForking
 
 ### load necessary modules, e.g.
 module load powertools
 module load GNU/5.2
 
-RUN_DIR=/mnt/home/lalejini/data/signal-gp-benchmarking/consensus/${PBS_JOBNAME}__${PBS_ARRAYID}
+RUN_DIR=/mnt/home/lalejini/data/signal-gp-benchmarking/consensus/${PBS_JOBNAME}_${PBS_ARRAYID}
 
 ### change to the working directory where your code is located
 cd /mnt/home/lalejini/devo_ws/signal-gp-benchmarking/consensus
@@ -20,4 +20,4 @@ cp ./ancestor.gp ${RUN_DIR}
 cp ./configs.cfg ${RUN_DIR}
 cp ./consensus ${RUN_DIR}
 cd ${RUN_DIR}
-./consensus -RANDOM_SEED ${PBS_ARRAYID} -EVENT_DRIVEN 1 -FORK_ON_MESSAGE 1 > run.log
+./consensus -RANDOM_SEED ${PBS_ARRAYID} -EVENT_DRIVEN 0 -FORK_ON_MESSAGE 0 > run.log
