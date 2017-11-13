@@ -3,7 +3,7 @@
 ### Configure job:
 #PBS -l walltime=04:00:00:00
 #PBS -l feature=intel16
-#PBS -l mem=4gb
+#PBS -l mem=16gb
 #PBS -t 201-300
 #PBS -N Imperative_MsgNonForking
 
