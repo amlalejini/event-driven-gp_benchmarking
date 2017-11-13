@@ -1,5 +1,7 @@
 // This is the main function for the NATIVE version of this project.
 
+// TODO: add some functions onto fitness file.
+
 #include <iostream>
 #include <string>
 #include <deque>
@@ -149,6 +151,7 @@ public:
       valid_votes.clear();
       max_vote_cnt = 0;
       for (size_t i = 0; i < grid.size(); ++i) {
+        inboxes[i].clear();
         schedule[i] = i;          // Re-jigger the schedule ordering.
         uids.emplace(i+1);        // UID = grid ID + 1; +1 to avoid giving out a UID of zero.
         grid[i].ResetHardware();  // Reset CPU hardware and traits (below).
@@ -331,6 +334,8 @@ protected:
   double PER_FUNC__FUNC_DEL_RATE;
   // Data output-specific settings.
   size_t SYSTEMATICS_INTERVAL;    //< Interval to save summary statistics.
+  size_t FITNESS_INTERVAL;        //< Interval to save fitness statistics.
+  size_t POPULATION_INTERVAL;
   size_t POP_SNAPSHOT_INTERVAL;   //< Interval to take full program snapshots of population.
   std::string DATA_DIRECTORY;     //< Directory in which to store all program output.
 
@@ -372,6 +377,8 @@ public:
     PER_FUNC__FUNC_DUP_RATE = config.PER_FUNC__FUNC_DUP_RATE();
     PER_FUNC__FUNC_DEL_RATE = config.PER_FUNC__FUNC_DEL_RATE();
     SYSTEMATICS_INTERVAL = config.SYSTEMATICS_INTERVAL();
+    FITNESS_INTERVAL = config.FITNESS_INTERVAL();
+    POPULATION_INTERVAL = config.POPULATION_INTERVAL();
     POP_SNAPSHOT_INTERVAL = config.POP_SNAPSHOT_INTERVAL();
     DATA_DIRECTORY = config.DATA_DIRECTORY();
 
@@ -500,7 +507,9 @@ public:
     // Setup the systematics output file.
     auto & sys_file = world->SetupSystematicsFile(DATA_DIRECTORY + "systematics.csv");
     sys_file.SetTimingRepeat(SYSTEMATICS_INTERVAL);
-
+    auto & fit_file = world->SetupFitnessFile(DATA_DIRECTORY + "fitness.csv");
+    fit_file.SetTimingRepeat(FITNESS_INTERVAL);
+    // world->SetupPopulationFile(DATA_DIRECTORY + "population.csv").SetTimingRepeat(POPULATION_INTERVAL);
   }
 
   ~ConsensusExp() {
