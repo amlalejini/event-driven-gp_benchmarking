@@ -11,6 +11,12 @@ Can I show that rewiring is actually trivial? Rewiring function calls vs. specia
 
 Stretch: how do systems respond to perturbations (antagonistic and neutral)?
 
+## Todos:
+- [ ] Consensus: alter fitness function to select for maintaining consensus completely until the end of the evaluation period?
+- [ ] Consensus: Analyze mode
+  - Will involves loading a population of programs in, evaluating everything, selecting the highest fitness individual, then collecting stats on that.
+- [ ] Implement pattern matching experiment.
+
 ## Benchmark Tasks/Environments
 To evaluate usefulness of capturing the event-driven paradigm, benchmark Signal GP with and without access to event-driven paradigm on several environments/tasks.
 
@@ -25,10 +31,9 @@ Evolve populations of distributed systems. When evaluating a system, initialize 
 Mutation occurs on group replication. Two options for replication: (1) EA style - evaluate entire population, assign fitnesses, tournament selection, (2) asynchronous - replicate on consensus (issue: bootstrapping evolution of consensus).  
 
 #### Treatments
-* Event-driven messaging, tag-based referencing
-* Event-driven messaging, hardcoded function names (affinities can't mutate; make available all possible affinity-instruction pairings)
-* Imperative messaging, tag-based referencing
-* Imperative messaging, hardcoded function names
+* Event-driven messaging.
+* Imperative messaging + auto fork on message read.
+* Imperative messaging + non-forking on message read.
 
 #### Things to keep in mind:
 * Pressure for achieving efficiency. (+ [Total Time - Time for consensus])
@@ -115,7 +120,7 @@ C. M. Byers, B. H. C. Cheng, and P. K. McKinley, Digital enzymes: agents of reac
 
 ### Robot Tag (predator-prey)
 
-See work done by Randy Olson. 
+See work done by Randy Olson.
 
 ### [~]Lawnmower Problem
 This problem is described and used in both a modified and original form in Spector et al. 2011.

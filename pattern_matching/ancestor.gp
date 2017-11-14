@@ -1,0 +1,11 @@
+Fn-0000000000000000:
+  Nop
+  SetRole1
+  Nop
+  Nop
+  SetRole2
+  Nop
+  Nop
+  SetRole3
+  Nop
+  Nop

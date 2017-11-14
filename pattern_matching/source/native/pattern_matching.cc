@@ -1,5 +1,7 @@
 // This is the main function for the NATIVE version of this project.
 
+// TODO: Update comments, add propagule size==1 treatment.
+
 #include <iostream>
 #include <string>
 #include <deque>
@@ -10,6 +12,7 @@
 
 #include "base/Ptr.h"
 #include "base/vector.h"
+#include "base/array.h"
 #include "config/ArgManager.h"
 #include "tools/Random.h"
 #include "tools/random_utils.h"
@@ -17,15 +20,14 @@
 #include "hardware/EventDrivenGP.h"
 #include "Evo/World.h"
 
-#include "consensus-config.h"
+#include "pattern_matching-config.h"
 
 constexpr size_t AFFINITY_WIDTH = 16;    //< How many bits make up each affinity?
 
 // Hardware trait indices. Each of these constants is an index into EventDrivenGP/Signal GP's trait vector.
 constexpr size_t TRAIT_ID__LOC     = 0;  //< Trait ID that specifies hardware's location within deme grid.
 constexpr size_t TRAIT_ID__DIR     = 1;  //< Trait ID that specifies hardware's orientation.
-constexpr size_t TRAIT_ID__UID     = 2;  //< Trait ID that specifies hardware's unique identifer.
-constexpr size_t TRAIT_ID__OPINION = 3;  //< Trait ID that specifies hardware's current opinion.
+constexpr size_t TRAIT_ID__ROLE    = 2;
 
 constexpr size_t NUM_NEIGHBORS = 4;      //< Number of neighboring locations for each grid location in a deme.
 
@@ -35,13 +37,21 @@ constexpr size_t DIR_LEFT = 1;
 constexpr size_t DIR_DOWN = 2;
 constexpr size_t DIR_RIGHT = 3;
 
-// Min and max valid unique idenifiers. Used when generating unique idenifiers for virtual hardware.
-constexpr size_t MIN_UID = 1;           //< Minimum bound on hardware UID. NOTE: This should not overlap 0. A 0 is used to specify no-vote.
-constexpr size_t MAX_UID = 10000;       //< Maximum bound on hardware UID.
+constexpr size_t ROLE_NONE = 0;
+constexpr size_t ROLE_1 = 1;
+constexpr size_t ROLE_2 = 2;
+constexpr size_t ROLE_3 = 3;
+
+constexpr size_t DEME_WIDTH = 6;
+constexpr size_t DEME_HEIGHT = 6;
+
+constexpr size_t NUM_PATTERNS = 12;
+
+
 
 /// Class to manage a consensus experiment.
 ///  - Will be configured based on treatment parameters.
-class ConsensusExp {
+class PatternMatchingExp {
 public:
   using hardware_t = emp::EventDrivenGP_AW<AFFINITY_WIDTH>;
   using program_t = hardware_t::Program;
@@ -58,28 +68,21 @@ public:
   /// some useful information about how the agent performed when evaluated.
   struct Agent {
     program_t program;          //< EventDrivenGP::Program (i.e. the agent's genotype).
-    size_t full_consensus_time; //< How many deme updates was this agent's program able to maintain a full, valid concensus?
-    size_t valid_votes;         //< After evaluation, how many votes are valid? (Range: [0:DEME SIZE])
-    size_t max_consensus;       //< After evaluation, what is the largest valid consensus? (Range: [0:DEME SIZE])
+    size_t max_pattern_score;
 
     Agent(const program_t & _p)
       : program(_p),
-        full_consensus_time(0),
-        valid_votes(0), max_consensus(0)
+        max_pattern_score(0)
     { ; }
 
     Agent(Agent && in)
       : program(in.program),
-        full_consensus_time(in.full_consensus_time),
-        valid_votes(in.valid_votes),
-        max_consensus(in.max_consensus)
+        max_pattern_score(in.max_pattern_score)
     { ; }
 
     Agent(const Agent & in)
       : program(in.program),
-        full_consensus_time(in.full_consensus_time),
-        valid_votes(in.valid_votes),
-        max_consensus(in.max_consensus)
+        max_pattern_score(in.max_pattern_score)
     { ; }
 
     /// Required by Empirical's World.h.
@@ -101,10 +104,6 @@ public:
     emp::vector<size_t> schedule; //< Utility vector to store order to give each hardware in the deme a CPU cycle on a single deme update.
     emp::vector<inbox_t> inboxes; //< Inbox for each hardware in the deme.
 
-    std::unordered_set<size_t> uids;             //< Set of UIDs currently in use.
-    std::unordered_multiset<size_t> valid_votes; //< Maintains the number of valid votes present in the deme at the end of the most recent deme-update.
-    size_t max_vote_cnt;                         //< Highest vote count for any single valid UID.
-
     emp::Ptr<emp::Random> rnd;  //< Pointer to a random number generator. NOTE: Deme struct is not responsible for pointer cleanup.
     program_t germ_prog;        //< Current program loaded onto deme hardware. Initialized to be empty.
 
@@ -118,20 +117,17 @@ public:
     Deme(emp::Ptr<emp::Random> _rnd, size_t _w, size_t _h, size_t _ibox_cap, emp::Ptr<inst_lib_t> _ilib, emp::Ptr<event_lib_t> _elib)
       : grid(), width(_w), height(_h), inbox_capacity(_ibox_cap),
         schedule(width*height), inboxes(width*height),
-        uids(), valid_votes(), max_vote_cnt(0),
         rnd(_rnd), germ_prog(_ilib)
     {
       // Fill out the grid with hardware.
       for (size_t i = 0; i < width * height; ++i) {
         grid.emplace_back(_ilib, _elib, rnd);
         schedule[i] = i;
-        uids.emplace(i+1);  // i+1 to avoid giving out a UID of zero.
         hardware_t & cpu = grid.back();
         // Set hardware traits to valid initial values.
         cpu.SetTrait(TRAIT_ID__LOC, i);
         cpu.SetTrait(TRAIT_ID__DIR, 0);       // We'll start everyone out facing up.
-        cpu.SetTrait(TRAIT_ID__UID, i+1);     // i+1 to avoid giving out a UID of zero.
-        cpu.SetTrait(TRAIT_ID__OPINION, 0);   // Opinion of 0 implies that no opinion was set.
+        cpu.SetTrait(TRAIT_ID__ROLE, ROLE_NONE);
       }
     }
 
@@ -145,18 +141,13 @@ public:
     /// Will want to use SetProgram function before trying to run the deme.
     void Reset() {
       germ_prog.Clear();
-      uids.clear();
-      valid_votes.clear();
-      max_vote_cnt = 0;
       for (size_t i = 0; i < grid.size(); ++i) {
         inboxes[i].clear();
         schedule[i] = i;          // Re-jigger the schedule ordering.
-        uids.emplace(i+1);        // UID = grid ID + 1; +1 to avoid giving out a UID of zero.
         grid[i].ResetHardware();  // Reset CPU hardware and traits (below).
         grid[i].SetTrait(TRAIT_ID__LOC, i);
         grid[i].SetTrait(TRAIT_ID__DIR, 0);
-        grid[i].SetTrait(TRAIT_ID__UID, i+1);
-        grid[i].SetTrait(TRAIT_ID__OPINION, 0);
+        grid[i].SetTrait(TRAIT_ID__ROLE, ROLE_NONE);
       }
     }
 
@@ -244,21 +235,6 @@ public:
       inboxes[id].emplace_back(event);
     }
 
-    /// Randomize unique identifiers for each agent (range of each: [MIN_UID:MAX_UID]). Function
-    /// ensures uniqueness.
-    void RandomizeUIDS() {
-      emp_assert(MAX_UID - MIN_UID > grid.size());
-      uids.clear();
-      valid_votes.clear();
-      max_vote_cnt = 0;
-      for (size_t i = 0; i < grid.size(); ++i) {
-        size_t val = rnd->GetUInt(MIN_UID, MAX_UID);
-        while (emp::Has(uids, val)) { val = rnd->GetUInt(MIN_UID, MAX_UID); }
-        grid[i].SetTrait(TRAIT_ID__UID, val);
-        uids.emplace(val);
-      }
-    }
-
     /// Advance deme by t timesteps. For each timestep, do a single advance of deme.
     void Advance(size_t t = 1) { for (size_t i = 0; i < t; ++i) SingleAdvance(); }
 
@@ -267,32 +243,26 @@ public:
     /// valid_votes and max_vote_cnt are updated for the single timestep.
     void SingleAdvance() {
       emp::Shuffle(*rnd, schedule); // Shuffle the schedule.
-      valid_votes.clear();
-      max_vote_cnt = 0;
       // Distribute the CPU cycles.
       for (size_t i = 0; i < schedule.size(); ++i) {
         grid[schedule[i]].SingleProcess();
-        // Has i voted for a valid agent?
-        size_t vote_i = (size_t)grid[schedule[i]].GetTrait(TRAIT_ID__OPINION);
-        if (emp::Has(uids, vote_i)) {
-          // If so, add i's vote.
-          valid_votes.emplace(vote_i);
-          size_t cnt = valid_votes.count(vote_i);
-          if (cnt > max_vote_cnt) max_vote_cnt = cnt;
-        }
       }
+    }
+
+    void PrintRoles(std::ostream & os=std::cout) {
+      os << "========= Roles =========";
+      for (size_t i = 0; i < grid.size(); ++i) {
+        if (!GetLocX(i)) os << "\n";
+        else os << " ";
+        os << grid[i].GetTrait(TRAIT_ID__ROLE);
+      }
+      os << "\n=========================\n";
     }
 
     /// Prints the states of all hardware in the deme along with some voting information.
     /// This function is primarily for debugging.
     void PrintState(std::ostream & os=std::cout) {
       os << "==== DEME STATE ====\n";
-      os << "  Total valid votes: " << valid_votes.size() << "\n";
-      os << "  Max consensus: " << max_vote_cnt << "\n";
-      os << "  Votes: ";
-      for (auto it = valid_votes.begin(); it != valid_votes.end(); ++it) {
-        std::cout << " {vote: " << *it << ", cnt: " << valid_votes.count(*it) << "}";
-      } os << "\n";
       for (size_t i = 0; i < grid.size(); ++i) {
         os << "--- Agent @ (" << GetLocX(i) << ", " << GetLocY(i) << ") ---\n";
         grid[i].PrintState(os); os << "\n";
@@ -318,8 +288,6 @@ protected:
   size_t HW_MAX_CALL_DEPTH;  //< Max call depth of hardware unit.
   double HW_MIN_BIND_THRESH; //< Hardware minimum binding threshold.
   // Deme-specific settings.
-  size_t DEME_WIDTH;      //< Width (in cells) of a deme. Deme size = deme width * deme height.
-  size_t DEME_HEIGHT;     //< Height (in cells) of a deme. Deme size = deme width * deme height.
   size_t DEME_EVAL_TIME;  //< How long should each deme get to evaluate?
   // Mutation-specific settings.
   size_t PROG_MAX_FUNC_CNT;
@@ -347,8 +315,11 @@ protected:
 
   emp::vector<affinity_t> affinity_table; //< Convenient table of affinities. (primarily used in debugging)
 
+  using row_t = emp::array<size_t, DEME_WIDTH>;
+  emp::array<emp::array<row_t, DEME_HEIGHT>, NUM_PATTERNS> patterns;
+
 public:
-  ConsensusExp(const ConsensusConfig & config)
+  PatternMatchingExp(const PatternMatchingConfig & config)
     : affinity_table(emp::Pow2(AFFINITY_WIDTH))
   {
     // Fill out experiment parameters with config settings!
@@ -363,8 +334,6 @@ public:
     HW_MAX_CORES = config.HW_MAX_CORES();
     HW_MAX_CALL_DEPTH = config.HW_MAX_CALL_DEPTH();
     HW_MIN_BIND_THRESH = config.HW_MIN_BIND_THRESH();
-    DEME_WIDTH = config.DEME_WIDTH();
-    DEME_HEIGHT = config.DEME_HEIGHT();
     DEME_EVAL_TIME = config.DEME_EVAL_TIME();
     PROG_MAX_FUNC_CNT = config.PROG_MAX_FUNC_CNT();
     PROG_MAX_FUNC_LEN = config.PROG_MAX_FUNC_LEN();
@@ -407,6 +376,44 @@ public:
       affinity_table[i].SetByte(0, (uint8_t)i);
     }
 
+    emp::vector<emp::vector<size_t>> templates = {{1,1,2,2,3,3},
+                                                  {3,1,1,2,2,3},
+                                                  {3,3,1,1,2,2},
+                                                  {2,3,3,1,1,2},
+                                                  {2,2,3,3,1,1},
+                                                  {1,2,2,3,3,1}};
+    // For each possible pattern: fill out ROLE configuration.
+    // Fill out row patterns.
+    for (size_t pID = 0; pID < templates.size(); ++pID) {
+      for (size_t r = 0; r < DEME_HEIGHT; ++r) {
+        for (size_t c = 0; c < DEME_WIDTH; ++c) {
+          patterns[pID][r][c] = templates[pID][c];
+        }
+      }
+    }
+    // Fill out column patterns.
+    for (size_t pID = 0; pID < templates.size(); ++pID) {
+      for (size_t c = 0; c < DEME_WIDTH; ++c) {
+        for (size_t r = 0; r < DEME_HEIGHT; ++r) {
+          patterns[pID + templates.size()][r][c] = templates[pID][r];
+        }
+      }
+    }
+
+    // Print patterns.
+    for (size_t pID = 0; pID < patterns.size(); ++pID) {
+      // Print this pattern.
+      std::cout << "-- Pattern ID: " << pID << std::endl;
+      for (size_t r = 0; r < patterns[pID].size(); ++r) {
+        for (size_t c = 0; c < patterns[pID][r].size(); ++c) {
+          if (!c) std::cout << "\n";
+          else std::cout << " ";
+          std::cout << patterns[pID][r][c];
+        }
+      }
+      std::cout << std::endl;
+    }
+
     // - Setup the instruction set. -
     // Standard instructions:
     inst_lib->AddInst("Inc", hardware_t::Inst_Inc, 1, "Increment value in local memory Arg1");
@@ -444,9 +451,10 @@ public:
     // Communication instructions:
     inst_lib->AddInst("SendMsgFacing", Inst_SendMsgFacing, 0, "Send output memory as message event to faced neighbor.", emp::ScopeType::BASIC, 0, {"affinity"});
     inst_lib->AddInst("BroadcastMsg", Inst_BroadcastMsg, 0, "Broadcast output memory as message event.", emp::ScopeType::BASIC, 0, {"affinity"});
-    // Consensus-specific instructions:
-    inst_lib->AddInst("GetUID", Inst_GetUID, 1, "LocalReg[Arg1] = Trait[UID]");
-    inst_lib->AddInst("SetOpinion", Inst_SetOpinion, 1, "Trait[Opinion] = LocalReg[Arg1]");
+    // Role-related instructions:
+    inst_lib->AddInst("SetRole1", Inst_SetRole1, 0, "Set role ID to 1.");
+    inst_lib->AddInst("SetRole2", Inst_SetRole2, 0, "Set role ID to 2.");
+    inst_lib->AddInst("SetRole3", Inst_SetRole3, 0, "Set role ID to 3.");
 
     // Are we forking on a message or not? All that changes are the message event handlers.
     if (FORK_ON_MESSAGE) {
@@ -508,9 +516,38 @@ public:
     auto & fit_file = world->SetupFitnessFile(DATA_DIRECTORY + "fitness.csv");
     fit_file.SetTimingRepeat(FITNESS_INTERVAL);
     // world->SetupPopulationFile(DATA_DIRECTORY + "population.csv").SetTimingRepeat(POPULATION_INTERVAL);
+
+
+    // Some debugging...
+    eval_deme->SetProgram(ancestor_prog);
+    eval_deme->PrintRoles();
+    for (size_t i = 0; i < 16; ++i) {
+      std::cout << "-------------------- " << i << " --------------------" << std::endl;
+      eval_deme->SingleAdvance();
+      eval_deme->PrintRoles();
+      std::cout << "-----------------------------------------" << std::endl;
+    }
+    size_t max_pattern_score = 0;
+    // Compute pattern matching score.
+    // - Reset pattern scores for each pattern.
+    emp::vector<size_t> pattern_scores(NUM_PATTERNS);
+    for (size_t k = 0; k < pattern_scores.size(); ++k) { pattern_scores[k] = 0; }
+    for (size_t i = 0; i < eval_deme->grid.size(); ++i) {
+      const size_t x = eval_deme->GetLocX(i);
+      const size_t y = eval_deme->GetLocY(i);
+      const size_t role = eval_deme->grid[i].GetTrait(TRAIT_ID__ROLE);
+      for (size_t pID = 0; pID < patterns.size(); ++pID) {
+        if (patterns[pID][y][x] == role) ++pattern_scores[pID];
+        if (pattern_scores[pID] > max_pattern_score) max_pattern_score = pattern_scores[pID];
+      }
+    }
+    std::cout << "Pattern scores:";
+    for (size_t i = 0; i < pattern_scores.size(); ++i) std::cout << " " << pattern_scores[i];
+    std::cout << std::endl;
+    // exit(-1);
   }
 
-  ~ConsensusExp() {
+  ~PatternMatchingExp() {
     world.Delete();
     eval_deme.Delete();
     inst_lib.Delete();
@@ -520,33 +557,32 @@ public:
 
   /// Run the experiment!
   void Run() {
-    size_t full_consensus_time = 0; // These are used for printing summary information about each update to std out.
-    size_t best_agent = 0;
-    double best_score = 0;
+    emp::vector<size_t> pattern_scores(NUM_PATTERNS);
+    size_t max_score = 0;
     for (size_t ud = 0; ud <= GENERATIONS; ++ud) {
+      max_score = 0;
       // Evaluate each agent.
-      best_agent = 0;
-      best_score = 0;
       for (size_t id = 0; id < world->GetSize(); ++id) {
         eval_deme->SetProgram(world->GetGenomeAt(id));  // Load agent's program onto evaluation deme.
-        eval_deme->RandomizeUIDS();         // Randomize evaluation deme hardwares' UIDs.
-        full_consensus_time = 0;            // Reset full consensus tracker.
         // Run the deme for some amount of time.
-        for (size_t t = 0; t < DEME_EVAL_TIME; ++t) {
-          // std::cout << "=============================== TIME: " << t << " ===============================" << std::endl;
-          eval_deme->SingleAdvance();
-          // Was there consensus?
-          if (eval_deme->max_vote_cnt == eval_deme->GetSize()) ++full_consensus_time;
-        }
+        for (size_t t = 0; t < DEME_EVAL_TIME; ++t) { eval_deme->SingleAdvance(); }
         // Compute some relevant information about deme performance.
         Agent & agent = world->GetOrg(id);
-        agent.max_consensus = eval_deme->max_vote_cnt;  // max vote count will have max consensus size at end of evaluation.
-        agent.valid_votes = eval_deme->valid_votes.size(); // TODO: check to make sure this is what we're expecting.
-        agent.full_consensus_time = full_consensus_time;
-        double score = CalcFitness(agent);
-        if (score > best_score) { best_score = score; best_agent = id; }
+        agent.max_pattern_score = 0;
+        // Compute pattern matching score.
+        // - Reset pattern scores for each pattern.
+        for (size_t k = 0; k < pattern_scores.size(); ++k) { pattern_scores[k] = 0; }
+        for (size_t i = 0; i < eval_deme->grid.size(); ++i) {
+          const size_t x = eval_deme->GetLocX(i);
+          const size_t y = eval_deme->GetLocY(i);
+          const size_t role = eval_deme->grid[i].GetTrait(TRAIT_ID__ROLE);
+          for (size_t pID = 0; pID < patterns.size(); ++pID) {
+            if (patterns[pID][y][x] == role) ++pattern_scores[pID];
+            if (pattern_scores[pID] > agent.max_pattern_score) agent.max_pattern_score = pattern_scores[pID];
+          }
+        }
+        if (agent.max_pattern_score > max_score) max_score = agent.max_pattern_score;
       }
-
       // Selection (nothing particularly interesting here).
       // Keep the best program around.
       emp::EliteSelect(*world, 1, 1);
@@ -554,11 +590,7 @@ public:
       emp::TournamentSelect(*world, 8, DEME_CNT - 1);
 
       // Print out in-run summary stats on dominant agent from last generation (which will be the first one).
-      std::cout << "Update " << world->GetUpdate();
-      std::cout << ", Max score: " << best_score << std::endl;
-      std::cout << "    Final max consensus: " << world->GetOrg(best_agent).max_consensus << std::endl;
-      std::cout << "    Final valid votes: " << world->GetOrg(best_agent).valid_votes << std::endl;
-      std::cout << "    Time at consensus: " << world->GetOrg(best_agent).full_consensus_time << std::endl;
+      std::cout << "Update " << world->GetUpdate() << ", Max score " << max_score << std::endl;
 
       // Update the world (generational turnover).
       world->Update();
@@ -591,7 +623,7 @@ public:
   /// Agent fitness = valid votes at end of evaluation + max consensus at end of evaluation +
   ///                 (number of deme updates where a full, valid consensus was maintained * deme size)
   double CalcFitness(Agent & agent) {
-    return (double)(agent.valid_votes + agent.max_consensus + (agent.full_consensus_time * eval_deme->GetSize()));
+    return agent.max_pattern_score;
   }
 
   /// Mutate organism function.
@@ -758,19 +790,16 @@ public:
     hw.TriggerEvent("MessageBroadcast", inst.affinity, state.output_mem, {"broadcast"});
   }
 
-  /// Instruction: GetUID
-  /// Description: Local[Arg1] = Trait[UID]
-  static void Inst_GetUID(hardware_t & hw, const inst_t & inst) {
-    state_t & state = hw.GetCurState();
-    state.SetLocal(inst.args[0], hw.GetTrait(TRAIT_ID__UID));
+  static void Inst_SetRole1(hardware_t & hw, const inst_t & inst) {
+    hw.SetTrait(TRAIT_ID__ROLE, ROLE_1);
   }
 
-  /// Instruction: SetOpinion
-  /// Description: Trait[Opinion] = Local[Arg1]
-  static void Inst_SetOpinion(hardware_t & hw, const inst_t & inst) {
-    state_t & state = hw.GetCurState();
-    double val = state.AccessLocal(inst.args[0]);
-    if (val > 0) hw.SetTrait(TRAIT_ID__OPINION, (int)val);
+  static void Inst_SetRole2(hardware_t & hw, const inst_t & inst) {
+    hw.SetTrait(TRAIT_ID__ROLE, ROLE_2);
+  }
+
+  static void Inst_SetRole3(hardware_t & hw, const inst_t & inst) {
+    hw.SetTrait(TRAIT_ID__ROLE, ROLE_3);
   }
 
   /// Instruction: Fork
@@ -817,9 +846,9 @@ int main(int argc, char * argv[])
   // Read configs.
   std::string config_fname = "configs.cfg";
   auto args = emp::cl::ArgManager(argc, argv);
-  ConsensusConfig config;
+  PatternMatchingConfig config;
   config.Read(config_fname);
-  if (args.ProcessConfigOptions(config, std::cout, config_fname, "consensus-config.h") == false) exit(0);
+  if (args.ProcessConfigOptions(config, std::cout, config_fname, "pattern_matching-config.h") == false) exit(0);
   if (args.TestUnknown() == false) exit(0);
 
   std::cout << "==============================" << std::endl;
@@ -829,6 +858,6 @@ int main(int argc, char * argv[])
   std::cout << "==============================\n" << std::endl;
 
   // Create experiment with configs, then run it!
-  ConsensusExp e(config);
+  PatternMatchingExp e(config);
   e.Run();
 }
