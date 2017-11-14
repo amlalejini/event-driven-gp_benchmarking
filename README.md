@@ -12,10 +12,14 @@ Can I show that rewiring is actually trivial? Rewiring function calls vs. specia
 Stretch: how do systems respond to perturbations (antagonistic and neutral)?
 
 ## Todos:
-- [ ] Consensus: alter fitness function to select for maintaining consensus completely until the end of the evaluation period?
-- [ ] Consensus: Analyze mode
-  - Will involves loading a population of programs in, evaluating everything, selecting the highest fitness individual, then collecting stats on that.
-- [ ] Implement pattern matching experiment.
+- [ ] Consensus
+  - [ ] Analyze mode
+    - Will involve loading a population of programs in, evaluating everything, selecting the highest fitness individual, then collecting stats on that.
+- [ ] Pattern matching:
+  - [ ] Analyze mode
+  - [ ] Update comments
+  - [ ] Add propagule size = 1 treatment (i.e. add inactive trait, repro instruction to set facing neighbor to be active)
+- [ ] Do a full pass update on README
 
 ## Benchmark Tasks/Environments
 To evaluate usefulness of capturing the event-driven paradigm, benchmark Signal GP with and without access to event-driven paradigm on several environments/tasks.
