@@ -11,13 +11,14 @@
 module load powertools
 module load GNU/5.2
 
-RUN_DIR=/mnt/home/lalejini/data/signal-gp-benchmarking/consensus/${PBS_JOBNAME}_${PBS_ARRAYID}
+BENCHMARK=consensus
+RUN_DIR=/mnt/home/lalejini/data/signal-gp-benchmarking/${BENCHMARK}/${PBS_JOBNAME}_${PBS_ARRAYID}
 
 ### change to the working directory where your code is located
-cd /mnt/home/lalejini/devo_ws/signal-gp-benchmarking/consensus
+cd /mnt/home/lalejini/devo_ws/signal-gp-benchmarking/${BENCHMARK}
 mkdir -p ${RUN_DIR}
 cp ./ancestor.gp ${RUN_DIR}
 cp ./configs.cfg ${RUN_DIR}
-cp ./consensus ${RUN_DIR}
+cp ./${BENCHMARK} ${RUN_DIR}
 cd ${RUN_DIR}
-./consensus -RANDOM_SEED ${PBS_ARRAYID} -EVENT_DRIVEN 0 -FORK_ON_MESSAGE 0 > run.log
+./${BENCHMARK} -RANDOM_SEED ${PBS_ARRAYID} -EVENT_DRIVEN 0 -FORK_ON_MESSAGE 0 > run.log
