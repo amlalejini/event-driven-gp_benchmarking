@@ -1,9 +1,5 @@
 // This is the main function for the NATIVE version of this project.
 
-// TODO: Update comments
-// TODO: Test Activate/propagule stuff --> Let activate facing call a function automatically?
-//        -- Ask Charles?
-
 #include <iostream>
 #include <string>
 #include <deque>
@@ -24,15 +20,15 @@
 
 #include "pattern_matching-config.h"
 
-constexpr size_t AFFINITY_WIDTH = 16;    //< How many bits make up each affinity?
+constexpr size_t AFFINITY_WIDTH = 16;    ///< How many bits make up each affinity?
 
 // Hardware trait indices. Each of these constants is an index into EventDrivenGP/Signal GP's trait vector.
-constexpr size_t TRAIT_ID__LOC     = 0;  //< Trait ID that specifies hardware's location within deme grid.
-constexpr size_t TRAIT_ID__DIR     = 1;  //< Trait ID that specifies hardware's orientation.
-constexpr size_t TRAIT_ID__ROLE    = 2;
-constexpr size_t TRAIT_ID__ACTIVE  = 3;
+constexpr size_t TRAIT_ID__LOC     = 0;  ///< Trait ID that specifies hardware's location within deme grid.
+constexpr size_t TRAIT_ID__DIR     = 1;  ///< Trait ID that specifies hardware's orientation.
+constexpr size_t TRAIT_ID__ROLE    = 2;  ///< Trait ID that specifies hardware's current role.
+constexpr size_t TRAIT_ID__ACTIVE  = 3;  ///< Trait ID that specifies whether or not the hardware is currently active.
 
-constexpr size_t NUM_NEIGHBORS = 4;      //< Number of neighboring locations for each grid location in a deme.
+constexpr size_t NUM_NEIGHBORS = 4;      ///< Number of neighboring locations for each grid location in a deme.
 
 // Orientation idenifiers. I.e. 0 means up, 1 means left, etc.
 constexpr size_t DIR_UP = 0;
@@ -40,19 +36,20 @@ constexpr size_t DIR_LEFT = 1;
 constexpr size_t DIR_DOWN = 2;
 constexpr size_t DIR_RIGHT = 3;
 
+// Utility specifiers for different role values.
 constexpr size_t ROLE_NONE = 0;
 constexpr size_t ROLE_1 = 1;
 constexpr size_t ROLE_2 = 2;
 constexpr size_t ROLE_3 = 3;
 
-constexpr size_t DEME_WIDTH = 6;
+constexpr size_t DEME_WIDTH = 6;  ///< For this experiment, deme size is locked in at 6x6.
 constexpr size_t DEME_HEIGHT = 6;
 
-constexpr size_t NUM_PATTERNS = 12;
+constexpr size_t NUM_PATTERNS = 12; ///< Number of possible orientations of target coordination pattern (french flag).
 
 
 
-/// Class to manage a consensus experiment.
+/// Class to manage a pattern matching experiment.
 ///  - Will be configured based on treatment parameters.
 class PatternMatchingExp {
 public:
@@ -66,11 +63,11 @@ public:
   using memory_t = hardware_t::memory_t;
   using affinity_t = hardware_t::affinity_t;
 
-  /// Struct to keep track of agents (target of evolution) for the Consensus experiment.
+  /// Struct to keep track of agents (target of evolution) for the experiment.
   /// Each agent is defined by its program (i.e. its genotype). Agent struct also contains
   /// some useful information about how the agent performed when evaluated.
   struct Agent {
-    program_t program;          //< EventDrivenGP::Program (i.e. the agent's genotype).
+    program_t program;          ///< EventDrivenGP::Program (i.e. the agent's genotype).
     size_t max_pattern_score;
 
     Agent(const program_t & _p)
@@ -92,24 +89,24 @@ public:
     program_t & GetGenome() { return program; }
   };
 
-  /// Struct to keep track of demes for the Consensus experiment.
+  /// Struct to keep track of demes for the experiment.
   /// Demes are toroidal grids of virtual hardware (EventDrivenGP/Signal GP).
   /// Hardware programs are homogeneous (i.e. each hardware unit has the exact same program loaded onto it).
   struct Deme {
     using grid_t = emp::vector<hardware_t>;
     using inbox_t = std::deque<event_t>;
 
-    grid_t grid;            //< Toroidal grid of hardware (stored in a 1D vector).
-    size_t width;           //< Width of the toroidal grid.
-    size_t height;          //< Height of the toroidal grid.
-    size_t inbox_capacity;  //< Max inbox capacity of hardware (when using inbox message delivery).
-    bool default_active;    //< Is hardware active/inactive by default?
+    grid_t grid;            ///< Toroidal grid of hardware (stored in a 1D vector).
+    size_t width;           ///< Width of the toroidal grid.
+    size_t height;          ///< Height of the toroidal grid.
+    size_t inbox_capacity;  ///< Max inbox capacity of hardware (when using inbox message delivery).
+    bool default_active;    ///< Is hardware active/inactive by default?
 
-    emp::vector<size_t> schedule; //< Utility vector to store order to give each hardware in the deme a CPU cycle on a single deme update.
-    emp::vector<inbox_t> inboxes; //< Inbox for each hardware in the deme.
+    emp::vector<size_t> schedule; ///< Utility vector to store order to give each hardware in the deme a CPU cycle on a single deme update.
+    emp::vector<inbox_t> inboxes; ///< Inbox for each hardware in the deme.
 
-    emp::Ptr<emp::Random> rnd;  //< Pointer to a random number generator. NOTE: Deme struct is not responsible for pointer cleanup.
-    program_t germ_prog;        //< Current program loaded onto deme hardware. Initialized to be empty.
+    emp::Ptr<emp::Random> rnd;  ///< Pointer to a random number generator. NOTE: Deme struct is not responsible for pointer cleanup.
+    program_t germ_prog;        ///< Current program loaded onto deme hardware. Initialized to be empty.
 
     /// Deme construction requires:
     ///  _rnd: pointer to random number generator (deme does not claim cleanup responsibility)
@@ -288,20 +285,20 @@ public:
 protected:
   // == Configurable experiment parameters ==
   // General settings.
-  bool DEBUG_MODE;    //< Are we in debug mode? NOTE: Currenly not in use.
-  int RANDOM_SEED;    //< Random seed to use for this experiment.
-  size_t DEME_CNT;    //< Population size. i.e. the number of demes in the population at each generation.
-  size_t GENERATIONS; //< How many generations (iterations of evolution) should we run the experiment?
-  std::string ANCESTOR_FPATH; //< File path to ancestor program description.
+  bool DEBUG_MODE;    ///< Are we in debug mode? NOTE: Currenly not in use.
+  int RANDOM_SEED;    ///< Random seed to use for this experiment.
+  size_t DEME_CNT;    ///< Population size. i.e. the number of demes in the population at each generation.
+  size_t GENERATIONS; ///< How many generations (iterations of evolution) should we run the experiment?
+  std::string ANCESTOR_FPATH; ///< File path to ancestor program description.
   // Hardware-specific settings.
-  bool EVENT_DRIVEN;         //< Is this consensus experiment event driven?
-  size_t INBOX_CAPACITY;     //< Message inbox capacity for agents. Only relevant for imperative agents.
-  bool FORK_ON_MESSAGE;      //< Should we fork a new process in a hardware unit when it handles a message?
-  size_t HW_MAX_CORES;       //< Max number of hardware cores. i.e. max number of simultaneous threads of execution hardware will support.
-  size_t HW_MAX_CALL_DEPTH;  //< Max call depth of hardware unit.
-  double HW_MIN_BIND_THRESH; //< Hardware minimum binding threshold.
+  bool EVENT_DRIVEN;         ///< Is this experiment event driven?
+  size_t INBOX_CAPACITY;     ///< Message inbox capacity for agents. Only relevant for imperative agents.
+  bool FORK_ON_MESSAGE;      ///< Should we fork a new process in a hardware unit when it handles a message?
+  size_t HW_MAX_CORES;       ///< Max number of hardware cores. i.e. max number of simultaneous threads of execution hardware will support.
+  size_t HW_MAX_CALL_DEPTH;  ///< Max call depth of hardware unit.
+  double HW_MIN_BIND_THRESH; ///< Hardware minimum binding threshold.
   // Deme-specific settings.
-  size_t DEME_EVAL_TIME;     //< How long should each deme get to evaluate?
+  size_t DEME_EVAL_TIME;     ///< How long should each deme get to evaluate?
   bool DEME_PROP_FULL;
   size_t DEME_PROP_SIZE;
   // Mutation-specific settings.
@@ -314,21 +311,21 @@ protected:
   double PER_FUNC__FUNC_DUP_RATE;
   double PER_FUNC__FUNC_DEL_RATE;
   // Data output-specific settings.
-  size_t SYSTEMATICS_INTERVAL;    //< Interval to save summary statistics.
-  size_t FITNESS_INTERVAL;        //< Interval to save fitness statistics.
+  size_t SYSTEMATICS_INTERVAL;    ///< Interval to save summary statistics.
+  size_t FITNESS_INTERVAL;        ///< Interval to save fitness statistics.
   size_t POPULATION_INTERVAL;
-  size_t POP_SNAPSHOT_INTERVAL;   //< Interval to take full program snapshots of population.
-  std::string DATA_DIRECTORY;     //< Directory in which to store all program output.
+  size_t POP_SNAPSHOT_INTERVAL;   ///< Interval to take full program snapshots of population.
+  std::string DATA_DIRECTORY;     ///< Directory in which to store all program output.
 
-  emp::Ptr<emp::Random> random;   //< Random number generator. Exp class is responsible for allocation and deallocation.
-  emp::Ptr<world_t> world;        //< Empirical world object. Exp class is responsible for allocation and deallocation.
+  emp::Ptr<emp::Random> random;   ///< Random number generator. Exp class is responsible for allocation and deallocation.
+  emp::Ptr<world_t> world;        ///< Empirical world object. Exp class is responsible for allocation and deallocation.
 
-  emp::Ptr<inst_lib_t> inst_lib;   //< Empirical hardware instruction library. Exp class is responsible for allocation and deallocation.
-  emp::Ptr<event_lib_t> event_lib; //< Empirical hardware event library. Exp class is responsible for allocation and deallocation.
+  emp::Ptr<inst_lib_t> inst_lib;   ///< Empirical hardware instruction library. Exp class is responsible for allocation and deallocation.
+  emp::Ptr<event_lib_t> event_lib; ///< Empirical hardware event library. Exp class is responsible for allocation and deallocation.
 
-  emp::Ptr<Deme> eval_deme;  //< We'll use a single deme to serially evaluate everyone in the evolving population every generation.
+  emp::Ptr<Deme> eval_deme;  ///< We'll use a single deme to serially evaluate everyone in the evolving population every generation.
 
-  emp::vector<affinity_t> affinity_table; //< Convenient table of affinities. (primarily used in debugging)
+  emp::vector<affinity_t> affinity_table; ///< Convenient table of affinities. (primarily used in debugging)
 
   using row_t = emp::array<size_t, DEME_WIDTH>;
   emp::array<emp::array<row_t, DEME_HEIGHT>, NUM_PATTERNS> patterns;
@@ -382,7 +379,7 @@ public:
     random = emp::NewPtr<emp::Random>(RANDOM_SEED);
 
     // Make the world.
-    world = emp::NewPtr<world_t>(random, "Consensus-World");
+    world = emp::NewPtr<world_t>(random, "PatternMatching-World");
     world->Reset();
 
     // Create empty instruction/event libraries.
@@ -549,36 +546,33 @@ public:
     sys_file.SetTimingRepeat(SYSTEMATICS_INTERVAL);
     auto & fit_file = world->SetupFitnessFile(DATA_DIRECTORY + "fitness.csv");
     fit_file.SetTimingRepeat(FITNESS_INTERVAL);
-    // world->SetupPopulationFile(DATA_DIRECTORY + "population.csv").SetTimingRepeat(POPULATION_INTERVAL);
-
 
     // Some debugging...
-    eval_deme->SetProgram(ancestor_prog);
-    eval_deme->PrintRoles();
-    for (size_t i = 0; i < 16; ++i) {
-      std::cout << "-------------------- " << i << " --------------------" << std::endl;
-      eval_deme->SingleAdvance();
-      eval_deme->PrintRoles();
-      std::cout << "-----------------------------------------" << std::endl;
-    }
-    size_t max_pattern_score = 0;
-    // Compute pattern matching score.
-    // - Reset pattern scores for each pattern.
-    emp::vector<size_t> pattern_scores(NUM_PATTERNS);
-    for (size_t k = 0; k < pattern_scores.size(); ++k) { pattern_scores[k] = 0; }
-    for (size_t i = 0; i < eval_deme->grid.size(); ++i) {
-      const size_t x = eval_deme->GetLocX(i);
-      const size_t y = eval_deme->GetLocY(i);
-      const size_t role = eval_deme->grid[i].GetTrait(TRAIT_ID__ROLE);
-      for (size_t pID = 0; pID < patterns.size(); ++pID) {
-        if (patterns[pID][y][x] == role) ++pattern_scores[pID];
-        if (pattern_scores[pID] > max_pattern_score) max_pattern_score = pattern_scores[pID];
-      }
-    }
-    std::cout << "Pattern scores:";
-    for (size_t i = 0; i < pattern_scores.size(); ++i) std::cout << " " << pattern_scores[i];
-    std::cout << std::endl;
-    // exit(-1);
+    // eval_deme->SetProgram(ancestor_prog);
+    // eval_deme->PrintRoles();
+    // for (size_t i = 0; i < 16; ++i) {
+    //   std::cout << "-------------------- " << i << " --------------------" << std::endl;
+    //   eval_deme->SingleAdvance();
+    //   eval_deme->PrintRoles();
+    //   std::cout << "-----------------------------------------" << std::endl;
+    // }
+    // size_t max_pattern_score = 0;
+    // // Compute pattern matching score.
+    // // - Reset pattern scores for each pattern.
+    // emp::vector<size_t> pattern_scores(NUM_PATTERNS);
+    // for (size_t k = 0; k < pattern_scores.size(); ++k) { pattern_scores[k] = 0; }
+    // for (size_t i = 0; i < eval_deme->grid.size(); ++i) {
+    //   const size_t x = eval_deme->GetLocX(i);
+    //   const size_t y = eval_deme->GetLocY(i);
+    //   const size_t role = eval_deme->grid[i].GetTrait(TRAIT_ID__ROLE);
+    //   for (size_t pID = 0; pID < patterns.size(); ++pID) {
+    //     if (patterns[pID][y][x] == role) ++pattern_scores[pID];
+    //     if (pattern_scores[pID] > max_pattern_score) max_pattern_score = pattern_scores[pID];
+    //   }
+    // }
+    // std::cout << "Pattern scores:";
+    // for (size_t i = 0; i < pattern_scores.size(); ++i) std::cout << " " << pattern_scores[i];
+    // std::cout << std::endl;
   }
 
   ~PatternMatchingExp() {
@@ -659,9 +653,8 @@ public:
   }
 
   /// Compute fitness of given agent. Assumes that agent has been evaluated already and that its
-  /// full_consensus_time, valid_votes, max_consensus member variables have been appropriately filled out.
-  /// Agent fitness = valid votes at end of evaluation + max consensus at end of evaluation +
-  ///                 (number of deme updates where a full, valid consensus was maintained * deme size)
+  /// max_pattern_score has already been computed and updated in the agent.
+  /// Fitness is equal to the maximum pattern matching score out of all possible orientations of the target pattern.
   double CalcFitness(Agent & agent) {
     return agent.max_pattern_score;
   }
@@ -862,7 +855,7 @@ public:
   }
 
   /// Instruction: ActivateFacing
-  /// Description: TODO
+  /// Description: Activate neighbor in direction specified by Trait[TRAIT_ID__DIR]. 
   void Inst_ActivateFacing(hardware_t hw, const inst_t & inst) {
     const size_t loc_id = (size_t)hw.GetTrait(TRAIT_ID__LOC);
     const size_t facing_id = eval_deme->GetFacing(loc_id);
