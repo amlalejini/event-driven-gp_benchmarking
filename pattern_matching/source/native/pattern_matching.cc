@@ -1,6 +1,8 @@
 // This is the main function for the NATIVE version of this project.
 
-// TODO: Update comments, add propagule size==1 treatment.
+// TODO: Update comments
+// TODO: Test Activate/propagule stuff --> Let activate facing call a function automatically?
+//        -- Ask Charles?
 
 #include <iostream>
 #include <string>
@@ -28,6 +30,7 @@ constexpr size_t AFFINITY_WIDTH = 16;    //< How many bits make up each affinity
 constexpr size_t TRAIT_ID__LOC     = 0;  //< Trait ID that specifies hardware's location within deme grid.
 constexpr size_t TRAIT_ID__DIR     = 1;  //< Trait ID that specifies hardware's orientation.
 constexpr size_t TRAIT_ID__ROLE    = 2;
+constexpr size_t TRAIT_ID__ACTIVE  = 3;
 
 constexpr size_t NUM_NEIGHBORS = 4;      //< Number of neighboring locations for each grid location in a deme.
 
@@ -100,6 +103,7 @@ public:
     size_t width;           //< Width of the toroidal grid.
     size_t height;          //< Height of the toroidal grid.
     size_t inbox_capacity;  //< Max inbox capacity of hardware (when using inbox message delivery).
+    bool default_active;    //< Is hardware active/inactive by default?
 
     emp::vector<size_t> schedule; //< Utility vector to store order to give each hardware in the deme a CPU cycle on a single deme update.
     emp::vector<inbox_t> inboxes; //< Inbox for each hardware in the deme.
@@ -114,8 +118,8 @@ public:
     ///  _ibox_cap: inbox capacity
     ///  _ilib: pointer to the instruction library that hardware will use. NOTE: Deme struct is not responsible for pointer cleanup.
     ///  _elib: pointer to event library that hardware will use. NOTE: Deme struct is not responsible for pointer cleanup.
-    Deme(emp::Ptr<emp::Random> _rnd, size_t _w, size_t _h, size_t _ibox_cap, emp::Ptr<inst_lib_t> _ilib, emp::Ptr<event_lib_t> _elib)
-      : grid(), width(_w), height(_h), inbox_capacity(_ibox_cap),
+    Deme(emp::Ptr<emp::Random> _rnd, size_t _w, size_t _h, size_t _ibox_cap, emp::Ptr<inst_lib_t> _ilib, emp::Ptr<event_lib_t> _elib, bool _def_active=true)
+      : grid(), width(_w), height(_h), inbox_capacity(_ibox_cap), default_active(_def_active),
         schedule(width*height), inboxes(width*height),
         rnd(_rnd), germ_prog(_ilib)
     {
@@ -128,6 +132,7 @@ public:
         cpu.SetTrait(TRAIT_ID__LOC, i);
         cpu.SetTrait(TRAIT_ID__DIR, 0);       // We'll start everyone out facing up.
         cpu.SetTrait(TRAIT_ID__ROLE, ROLE_NONE);
+        cpu.SetTrait(TRAIT_ID__ACTIVE, default_active);    // Start everyone out as active by default.
       }
     }
 
@@ -148,6 +153,7 @@ public:
         grid[i].SetTrait(TRAIT_ID__LOC, i);
         grid[i].SetTrait(TRAIT_ID__DIR, 0);
         grid[i].SetTrait(TRAIT_ID__ROLE, ROLE_NONE);
+        grid[i].SetTrait(TRAIT_ID__ACTIVE, default_active);
       }
     }
 
@@ -189,6 +195,8 @@ public:
         grid[i].SetMinBindThresh(threshold);
       }
     }
+
+    void SetDefaultState(bool active=true) { default_active = active; }
 
     const program_t & GetProgram() const { return germ_prog; }
 
@@ -235,6 +243,10 @@ public:
       inboxes[id].emplace_back(event);
     }
 
+    void Activate(size_t id) { grid[id].SetTrait(TRAIT_ID__ACTIVE, 1); }
+
+    void Deactivate(size_t id) { grid[id].SetTrait(TRAIT_ID__ACTIVE, 0); }
+
     /// Advance deme by t timesteps. For each timestep, do a single advance of deme.
     void Advance(size_t t = 1) { for (size_t i = 0; i < t; ++i) SingleAdvance(); }
 
@@ -245,7 +257,8 @@ public:
       emp::Shuffle(*rnd, schedule); // Shuffle the schedule.
       // Distribute the CPU cycles.
       for (size_t i = 0; i < schedule.size(); ++i) {
-        grid[schedule[i]].SingleProcess();
+        hardware_t & cpu = grid[schedule[i]];
+        if (cpu.GetTrait(TRAIT_ID__ACTIVE)) cpu.SingleProcess();
       }
     }
 
@@ -288,7 +301,9 @@ protected:
   size_t HW_MAX_CALL_DEPTH;  //< Max call depth of hardware unit.
   double HW_MIN_BIND_THRESH; //< Hardware minimum binding threshold.
   // Deme-specific settings.
-  size_t DEME_EVAL_TIME;  //< How long should each deme get to evaluate?
+  size_t DEME_EVAL_TIME;     //< How long should each deme get to evaluate?
+  bool DEME_PROP_FULL;
+  size_t DEME_PROP_SIZE;
   // Mutation-specific settings.
   size_t PROG_MAX_FUNC_CNT;
   size_t PROG_MAX_FUNC_LEN;
@@ -335,6 +350,8 @@ public:
     HW_MAX_CALL_DEPTH = config.HW_MAX_CALL_DEPTH();
     HW_MIN_BIND_THRESH = config.HW_MIN_BIND_THRESH();
     DEME_EVAL_TIME = config.DEME_EVAL_TIME();
+    DEME_PROP_FULL = config.DEME_PROP_FULL();
+    DEME_PROP_SIZE = config.DEME_PROP_SIZE();
     PROG_MAX_FUNC_CNT = config.PROG_MAX_FUNC_CNT();
     PROG_MAX_FUNC_LEN = config.PROG_MAX_FUNC_LEN();
     PROG_MAX_ARG_VAL = config.PROG_MAX_ARG_VAL();
@@ -348,6 +365,14 @@ public:
     POPULATION_INTERVAL = config.POPULATION_INTERVAL();
     POP_SNAPSHOT_INTERVAL = config.POP_SNAPSHOT_INTERVAL();
     DATA_DIRECTORY = config.DATA_DIRECTORY();
+
+    // Do a little parameter cleaning:
+    //  - Make sure propagule size is <= deme size.
+    if (DEME_PROP_SIZE > DEME_WIDTH * DEME_HEIGHT) {
+      std::cout << "WARNING: DEME_PROP_SIZE cannot be > total deme size." << std::endl;
+      DEME_PROP_SIZE = DEME_WIDTH * DEME_HEIGHT;
+      std::cout << "  Changed DEME_PROP_SIZE to: " << DEME_PROP_SIZE << std::endl;
+    }
 
     // Setup the output directory.
     mkdir(DATA_DIRECTORY.c_str(), ACCESSPERMS);
@@ -365,7 +390,7 @@ public:
     event_lib = emp::NewPtr<event_lib_t>();
 
     // Create the deme that will be used to evaluate evolving programs.
-    eval_deme = emp::NewPtr<Deme>(random, DEME_WIDTH, DEME_HEIGHT, INBOX_CAPACITY, inst_lib, event_lib);
+    eval_deme = emp::NewPtr<Deme>(random, DEME_WIDTH, DEME_HEIGHT, INBOX_CAPACITY, inst_lib, event_lib, DEME_PROP_FULL);
     // Do some hardware configuration in the deme.
     eval_deme->SetHardwareMinBindThresh(HW_MIN_BIND_THRESH);
     eval_deme->SetHardwareMaxCores(HW_MAX_CORES);
@@ -491,6 +516,15 @@ public:
       });
     }
 
+    // - Setup full propagule vs. partial propagule differences. -
+    if (!DEME_PROP_FULL) {
+      // If we're not doing a full propagule size, agents need a way to 'reproduce' to fill out the deme.
+      //  - We'll model this with an 'activate' instruction that activates the faced neighbor.
+      inst_lib->AddInst("ActivateFacing", [this](hardware_t & hw, const inst_t & inst) {
+        this->Inst_ActivateFacing(hw, inst);
+      }, 0, "Activate faced neighbor (if they're inactive; does nothing if they're already active).");
+    }
+
     // Configure the ancestor program.
     program_t ancestor_prog(inst_lib);
     std::ifstream ancestor_fstream(ANCESTOR_FPATH);
@@ -564,6 +598,12 @@ public:
       // Evaluate each agent.
       for (size_t id = 0; id < world->GetSize(); ++id) {
         eval_deme->SetProgram(world->GetGenomeAt(id));  // Load agent's program onto evaluation deme.
+        // If !DEME_PROP_FULL:
+        if (!DEME_PROP_FULL) {
+          // We need to activate a number of hardwares equal to DEME_PROP_SIZE
+          emp::Shuffle(*random, eval_deme->schedule);
+          for (size_t i = 0; i < DEME_PROP_SIZE; ++i) { eval_deme->Activate(eval_deme->schedule[i]); }
+        }
         // Run the deme for some amount of time.
         for (size_t t = 0; t < DEME_EVAL_TIME; ++t) { eval_deme->SingleAdvance(); }
         // Compute some relevant information about deme performance.
@@ -819,6 +859,14 @@ public:
       hw.HandleEvent(eval_deme->GetInbox(loc_id).front());  // NOTE: Assumes that Event handler won't mess with inbox.
       eval_deme->GetInbox(loc_id).pop_front();
     }
+  }
+
+  /// Instruction: ActivateFacing
+  /// Description: TODO
+  void Inst_ActivateFacing(hardware_t hw, const inst_t & inst) {
+    const size_t loc_id = (size_t)hw.GetTrait(TRAIT_ID__LOC);
+    const size_t facing_id = eval_deme->GetFacing(loc_id);
+    eval_deme->Activate(facing_id);
   }
 
   // ============== Some event handlers used in this experiment: ==============

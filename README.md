@@ -18,7 +18,7 @@ Stretch: how do systems respond to perturbations (antagonistic and neutral)?
 - [ ] Pattern matching:
   - [ ] Analyze mode
   - [ ] Update comments
-  - [ ] Add propagule size = 1 treatment (i.e. add inactive trait, repro instruction to set facing neighbor to be active)
+  - [.] Add propagule size = 1 treatment (i.e. add inactive trait, repro instruction to set facing neighbor to be active)
 - [ ] Do a full pass update on README
 
 ## Benchmark Tasks/Environments
