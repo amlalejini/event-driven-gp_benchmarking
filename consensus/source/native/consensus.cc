@@ -19,15 +19,15 @@
 
 #include "consensus-config.h"
 
-constexpr size_t AFFINITY_WIDTH = 16;    //< How many bits make up each affinity?
+constexpr size_t AFFINITY_WIDTH = 16;    ///< How many bits make up each affinity?
 
 // Hardware trait indices. Each of these constants is an index into EventDrivenGP/Signal GP's trait vector.
-constexpr size_t TRAIT_ID__LOC     = 0;  //< Trait ID that specifies hardware's location within deme grid.
-constexpr size_t TRAIT_ID__DIR     = 1;  //< Trait ID that specifies hardware's orientation.
-constexpr size_t TRAIT_ID__UID     = 2;  //< Trait ID that specifies hardware's unique identifer.
-constexpr size_t TRAIT_ID__OPINION = 3;  //< Trait ID that specifies hardware's current opinion.
+constexpr size_t TRAIT_ID__LOC     = 0;  ///< Trait ID that specifies hardware's location within deme grid.
+constexpr size_t TRAIT_ID__DIR     = 1;  ///< Trait ID that specifies hardware's orientation.
+constexpr size_t TRAIT_ID__UID     = 2;  ///< Trait ID that specifies hardware's unique identifer.
+constexpr size_t TRAIT_ID__OPINION = 3;  ///< Trait ID that specifies hardware's current opinion.
 
-constexpr size_t NUM_NEIGHBORS = 4;      //< Number of neighboring locations for each grid location in a deme.
+constexpr size_t NUM_NEIGHBORS = 4;      ///< Number of neighboring locations for each grid location in a deme.
 
 // Orientation idenifiers. I.e. 0 means up, 1 means left, etc.
 constexpr size_t DIR_UP = 0;
@@ -36,8 +36,8 @@ constexpr size_t DIR_DOWN = 2;
 constexpr size_t DIR_RIGHT = 3;
 
 // Min and max valid unique idenifiers. Used when generating unique idenifiers for virtual hardware.
-constexpr size_t MIN_UID = 1;             //< Minimum bound on hardware UID. NOTE: This should not overlap 0. A 0 is used to specify no-vote.
-constexpr size_t MAX_UID = 1000000;       //< Maximum bound on hardware UID.
+constexpr size_t MIN_UID = 1;             ///< Minimum bound on hardware UID. NOTE: This should not overlap 0. A 0 is used to specify no-vote.
+constexpr size_t MAX_UID = 1000000;       ///< Maximum bound on hardware UID.
 
 /// Class to manage a consensus experiment.
 ///  - Will be configured based on treatment parameters.
@@ -57,10 +57,10 @@ public:
   /// Each agent is defined by its program (i.e. its genotype). Agent struct also contains
   /// some useful information about how the agent performed when evaluated.
   struct Agent {
-    program_t program;          //< EventDrivenGP::Program (i.e. the agent's genotype).
-    size_t full_consensus_time; //< How many deme updates was this agent's program able to maintain a full, valid concensus?
-    size_t valid_votes;         //< After evaluation, how many votes are valid? (Range: [0:DEME SIZE])
-    size_t max_consensus;       //< After evaluation, what is the largest valid consensus? (Range: [0:DEME SIZE])
+    program_t program;          ///< EventDrivenGP::Program (i.e. the agent's genotype).
+    size_t full_consensus_time; ///< How many deme updates was this agent's program able to maintain a full, valid concensus?
+    size_t valid_votes;         ///< After evaluation, how many votes are valid? (Range: [0:DEME SIZE])
+    size_t max_consensus;       ///< After evaluation, what is the largest valid consensus? (Range: [0:DEME SIZE])
 
     Agent(const program_t & _p)
       : program(_p),
@@ -93,20 +93,20 @@ public:
     using grid_t = emp::vector<hardware_t>;
     using inbox_t = std::deque<event_t>;
 
-    grid_t grid;            //< Toroidal grid of hardware (stored in a 1D vector).
-    size_t width;           //< Width of the toroidal grid.
-    size_t height;          //< Height of the toroidal grid.
-    size_t inbox_capacity;  //< Max inbox capacity of hardware (when using inbox message delivery).
+    grid_t grid;            ///< Toroidal grid of hardware (stored in a 1D vector).
+    size_t width;           ///< Width of the toroidal grid.
+    size_t height;          ///< Height of the toroidal grid.
+    size_t inbox_capacity;  ///< Max inbox capacity of hardware (when using inbox message delivery).
 
-    emp::vector<size_t> schedule; //< Utility vector to store order to give each hardware in the deme a CPU cycle on a single deme update.
-    emp::vector<inbox_t> inboxes; //< Inbox for each hardware in the deme.
+    emp::vector<size_t> schedule; ///< Utility vector to store order to give each hardware in the deme a CPU cycle on a single deme update.
+    emp::vector<inbox_t> inboxes; ///< Inbox for each hardware in the deme.
 
-    std::unordered_set<size_t> uids;             //< Set of UIDs currently in use.
-    std::unordered_multiset<size_t> valid_votes; //< Maintains the number of valid votes present in the deme at the end of the most recent deme-update.
-    size_t max_vote_cnt;                         //< Highest vote count for any single valid UID.
+    std::unordered_set<size_t> uids;             ///< Set of UIDs currently in use.
+    std::unordered_multiset<size_t> valid_votes; ///< Maintains the number of valid votes present in the deme at the end of the most recent deme-update.
+    size_t max_vote_cnt;                         ///< Highest vote count for any single valid UID.
 
-    emp::Ptr<emp::Random> rnd;  //< Pointer to a random number generator. NOTE: Deme struct is not responsible for pointer cleanup.
-    program_t germ_prog;        //< Current program loaded onto deme hardware. Initialized to be empty.
+    emp::Ptr<emp::Random> rnd;  ///< Pointer to a random number generator. NOTE: Deme struct is not responsible for pointer cleanup.
+    program_t germ_prog;        ///< Current program loaded onto deme hardware. Initialized to be empty.
 
     /// Deme construction requires:
     ///  _rnd: pointer to random number generator (deme does not claim cleanup responsibility)
@@ -305,22 +305,22 @@ public:
 protected:
   // == Configurable experiment parameters ==
   // General settings.
-  bool DEBUG_MODE;    //< Are we in debug mode? NOTE: Currenly not in use.
-  int RANDOM_SEED;    //< Random seed to use for this experiment.
-  size_t DEME_CNT;    //< Population size. i.e. the number of demes in the population at each generation.
-  size_t GENERATIONS; //< How many generations (iterations of evolution) should we run the experiment?
-  std::string ANCESTOR_FPATH; //< File path to ancestor program description.
+  bool DEBUG_MODE;    ///< Are we in debug mode? NOTE: Currenly not in use.
+  int RANDOM_SEED;    ///< Random seed to use for this experiment.
+  size_t DEME_CNT;    ///< Population size. i.e. the number of demes in the population at each generation.
+  size_t GENERATIONS; ///< How many generations (iterations of evolution) should we run the experiment?
+  std::string ANCESTOR_FPATH; ///< File path to ancestor program description.
   // Hardware-specific settings.
-  bool EVENT_DRIVEN;         //< Is this consensus experiment event driven?
-  size_t INBOX_CAPACITY;     //< Message inbox capacity for agents. Only relevant for imperative agents.
-  bool FORK_ON_MESSAGE;      //< Should we fork a new process in a hardware unit when it handles a message?
-  size_t HW_MAX_CORES;       //< Max number of hardware cores. i.e. max number of simultaneous threads of execution hardware will support.
-  size_t HW_MAX_CALL_DEPTH;  //< Max call depth of hardware unit.
-  double HW_MIN_BIND_THRESH; //< Hardware minimum binding threshold.
+  bool EVENT_DRIVEN;         ///< Is this consensus experiment event driven?
+  size_t INBOX_CAPACITY;     ///< Message inbox capacity for agents. Only relevant for imperative agents.
+  bool FORK_ON_MESSAGE;      ///< Should we fork a new process in a hardware unit when it handles a message?
+  size_t HW_MAX_CORES;       ///< Max number of hardware cores. i.e. max number of simultaneous threads of execution hardware will support.
+  size_t HW_MAX_CALL_DEPTH;  ///< Max call depth of hardware unit.
+  double HW_MIN_BIND_THRESH; ///< Hardware minimum binding threshold.
   // Deme-specific settings.
-  size_t DEME_WIDTH;      //< Width (in cells) of a deme. Deme size = deme width * deme height.
-  size_t DEME_HEIGHT;     //< Height (in cells) of a deme. Deme size = deme width * deme height.
-  size_t DEME_EVAL_TIME;  //< How long should each deme get to evaluate?
+  size_t DEME_WIDTH;      ///< Width (in cells) of a deme. Deme size = deme width * deme height.
+  size_t DEME_HEIGHT;     ///< Height (in cells) of a deme. Deme size = deme width * deme height.
+  size_t DEME_EVAL_TIME;  ///< How long should each deme get to evaluate?
   // Mutation-specific settings.
   size_t PROG_MAX_FUNC_CNT;
   size_t PROG_MAX_FUNC_LEN;
@@ -331,21 +331,21 @@ protected:
   double PER_FUNC__FUNC_DUP_RATE;
   double PER_FUNC__FUNC_DEL_RATE;
   // Data output-specific settings.
-  size_t SYSTEMATICS_INTERVAL;    //< Interval to save summary statistics.
-  size_t FITNESS_INTERVAL;        //< Interval to save fitness statistics.
+  size_t SYSTEMATICS_INTERVAL;    ///< Interval to save summary statistics.
+  size_t FITNESS_INTERVAL;        ///< Interval to save fitness statistics.
   size_t POPULATION_INTERVAL;
-  size_t POP_SNAPSHOT_INTERVAL;   //< Interval to take full program snapshots of population.
-  std::string DATA_DIRECTORY;     //< Directory in which to store all program output.
+  size_t POP_SNAPSHOT_INTERVAL;   ///< Interval to take full program snapshots of population.
+  std::string DATA_DIRECTORY;     ///< Directory in which to store all program output.
 
-  emp::Ptr<emp::Random> random;   //< Random number generator. Exp class is responsible for allocation and deallocation.
-  emp::Ptr<world_t> world;        //< Empirical world object. Exp class is responsible for allocation and deallocation.
+  emp::Ptr<emp::Random> random;   ///< Random number generator. Exp class is responsible for allocation and deallocation.
+  emp::Ptr<world_t> world;        ///< Empirical world object. Exp class is responsible for allocation and deallocation.
 
-  emp::Ptr<inst_lib_t> inst_lib;   //< Empirical hardware instruction library. Exp class is responsible for allocation and deallocation.
-  emp::Ptr<event_lib_t> event_lib; //< Empirical hardware event library. Exp class is responsible for allocation and deallocation.
+  emp::Ptr<inst_lib_t> inst_lib;   ///< Empirical hardware instruction library. Exp class is responsible for allocation and deallocation.
+  emp::Ptr<event_lib_t> event_lib; ///< Empirical hardware event library. Exp class is responsible for allocation and deallocation.
 
-  emp::Ptr<Deme> eval_deme;  //< We'll use a single deme to serially evaluate everyone in the evolving population every generation.
+  emp::Ptr<Deme> eval_deme;  ///< We'll use a single deme to serially evaluate everyone in the evolving population every generation.
 
-  emp::vector<affinity_t> affinity_table; //< Convenient table of affinities. (primarily used in debugging)
+  emp::vector<affinity_t> affinity_table; ///< Convenient table of affinities. (primarily used in debugging)
 
 public:
   ConsensusExp(const ConsensusConfig & config)
