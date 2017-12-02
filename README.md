@@ -1,9 +1,11 @@
-# Event-driven GP Benchmarking
-The goal of this project is to compare the evolvability of an event-driven genetic programming representation with an imperative version of the same representation. Stretch goal: also include PushGP, CartesianGP on all tasks. (maybe in an extension... If everything gets thrown into MABE, would be easy :wink: :wink:)
+# Signal GP Benchmarking
+The goal of this project is to compare the evolvability of an event-driven genetic programming representation with an imperative version of the same representation.
+
+Stretch goal: also include PushGP, CartesianGP on all tasks. (maybe in an extension... If everything gets thrown into MABE, would be easy :wink: :wink:)
 
 General experiment setup: Signal GP with and without events.
 
-Does event-driven linear genetic programming offer advantages over traditional imperative linear genetic programming? Disadvantages?
+Question: Does event-driven linear genetic programming offer advantages over traditional imperative linear genetic programming? Does it offer disadvantages?
 
 What types of tasks might one form of linear GP outperform the other?
 
@@ -11,29 +13,36 @@ Can I show that rewiring is actually trivial? Rewiring function calls vs. specia
 
 Stretch: how do systems respond to perturbations (antagonistic and neutral)?
 
+## Experiment Notes
+* 50 replicates of each treatment.
+
 ## Todos:
 - [ ] Consensus
   - [ ] Analyze mode
     - Will involve loading a population of programs in, evaluating everything, selecting the highest fitness individual, then collecting stats on that.
 - [ ] Pattern matching:
-  - [ ] Analyze mode
-  - [ ] Update comments
-  - [x] Add propagule size = 1 treatment (i.e. add inactive trait, repro instruction to set facing neighbor to be active)
+  - [ ] Analyze mode.
+  - [ ] Update comments.
+  - [x] Add propagule size = 1 treatment (i.e. add inactive trait, repro instruction to set facing neighbor to be active).
     - Q: Should new propagules have a function auto-called by parent repro instruction?
-- [ ] Do a full pass update on README
+- [ ] Python utility scripts
+  - [ ] Check for job completion.
+  - [ ] Generate resub qsub files.
 
 ## Benchmark Tasks/Environments
-To evaluate usefulness of capturing the event-driven paradigm, benchmark Signal GP with and without access to event-driven paradigm on several environments/tasks.
+To evaluate usefulness of capturing the event-driven paradigm in genetic programming, I am benchmarking Signal GP with and without access to the event-driven paradigm on several environments/tasks.
 
-For sure: consensus, pattern matching
-Maybe: lawnmower, predator/prey, foraging
+Tasks (for sure): consensus, pattern matching </br>
+Tasks (maybe): lawnmower, predator/prey, foraging
 
 ### Consensus/Leader Election
 Pull problem description primarily from (Weise and Tang, 2012) and (Knoester et al., 2013).
 
 Evolve populations of distributed systems. When evaluating a system, initialize all agents within the system with identical programs (homogeneous systems).
 
-Mutation occurs on group replication. Two options for replication: (1) EA style - evaluate entire population, assign fitnesses, tournament selection, (2) asynchronous - replicate on consensus (issue: bootstrapping evolution of consensus).  
+Mutation occurs on group replication. Two options for replication:
+  1. EA style - evaluate entire population, assign fitnesses, tournament selection
+  2. asynchronous - replicate on consensus (issue: bootstrapping evolution of consensus).  
 
 #### Treatments
 * Event-driven messaging.
@@ -41,9 +50,9 @@ Mutation occurs on group replication. Two options for replication: (1) EA style 
 * Imperative messaging + non-forking on message read.
 
 #### Things to keep in mind:
-* Pressure for achieving efficiency. (+ [Total Time - Time for consensus])
-* Likely fitness function: max(supported ID) + [total time - time in which consensus is achieved]
-  - What about maintaining consensus?
+* Fitness function
+  - Pressure for achieving efficiency.
+  - Pressure for achieving and maintaining consensus.
 
 #### Problem description from (Weise and Tang, 2012):
 Given network N of nodes n performing an election is as follows:
@@ -101,19 +110,10 @@ Pattern: French flag (of arbitrary orientation).
 Extend the consensus environment in terms of agent capabilities (eliminate agent identifiers, though).
 
 #### Treatments
-* Event-driven messaging, tag-based referencing
-  - Messages trigger events upon receiving.
-  - Messages have affinities(i.e. tags) that determine which function they call.
-  - Calls have affinities that bind to proper functions.
-* Event-driven messaging, hardcoded referencing
-  - Messages trigger events upon receiving.
-  - Events call a function by ID. (send-msg arg1 => ID = arg1 % function count)  
-* Imperative messaging, tag-based referencing
-  - Messages are sent to inbox, must be requested via instruction.
-  - Call operates with affinities.
-* Imperative messaging, hardcoded referencing
-  - Messages send to inbox, must be requested via instruction.
-  - Call calls function ID determined by arg1 % function count.
+* Event-driven messaging.
+* Imperative messaging w/automatic forking.
+* Imperative messaging w/out automatic forking.
+* Event-driven messaging w/propagule size = 1. (exploratory treatment for tangential research)
 
 #### References:
 D. Federici and K. Downing, “Evolution and Development of a Multicellular Organism: Scalability, Resilience, and Neutral Complexification,” Artif. Life, vol. 12, no. 3, pp. 381–409, 2006.
@@ -123,7 +123,7 @@ D. Federici and K. Downing, “Evolution and Development of a Multicellular Orga
 #### References
 C. M. Byers, B. H. C. Cheng, and P. K. McKinley, Digital enzymes: agents of reaction inside robotic controllers for the foraging problem. New York, New York, USA: ACM, 2011, pp. 243–250.
 
-### Robot Tag (predator-prey)
+### [~]Robot Tag (predator-prey)
 
 See work done by Randy Olson.
 
@@ -163,7 +163,7 @@ Koza, J. R. (1992). Genetic programming: on the programming of computers by mean
     - Task success post-perturbation
     - 'Evolvability' in response to perturbation
 - Task efficiency
-- Task 'Evolvability'
+- Task 'evolvability'
   - Amount of time to achieve 'adequate' task performance.
 
 ## Experiment Measurements

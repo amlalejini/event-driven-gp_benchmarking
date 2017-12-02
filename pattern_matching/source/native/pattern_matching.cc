@@ -621,7 +621,7 @@ public:
       // Keep the best program around.
       emp::EliteSelect(*world, 1, 1);
       // Run a tournament for the rest.
-      emp::TournamentSelect(*world, 8, DEME_CNT - 1);
+      emp::TournamentSelect(*world, 4, DEME_CNT - 1);
 
       // Print out in-run summary stats on dominant agent from last generation (which will be the first one).
       std::cout << "Update " << world->GetUpdate() << ", Max score " << max_score << std::endl;
@@ -855,7 +855,7 @@ public:
   }
 
   /// Instruction: ActivateFacing
-  /// Description: Activate neighbor in direction specified by Trait[TRAIT_ID__DIR]. 
+  /// Description: Activate neighbor in direction specified by Trait[TRAIT_ID__DIR].
   void Inst_ActivateFacing(hardware_t hw, const inst_t & inst) {
     const size_t loc_id = (size_t)hw.GetTrait(TRAIT_ID__LOC);
     const size_t facing_id = eval_deme->GetFacing(loc_id);

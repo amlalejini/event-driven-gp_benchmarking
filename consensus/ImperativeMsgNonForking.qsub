@@ -4,7 +4,7 @@
 #PBS -l walltime=04:00:00:00
 #PBS -l feature=intel16
 #PBS -l mem=8gb
-#PBS -t 201-300
+#PBS -t 201-250
 #PBS -N Imperative_MsgNonForking
 
 ### load necessary modules, e.g.
@@ -12,7 +12,7 @@ module load powertools
 module load GNU/5.2
 
 BENCHMARK=consensus
-RUN_DIR=/mnt/home/lalejini/data/signal-gp-benchmarking/${BENCHMARK}/${PBS_JOBNAME}_${PBS_ARRAYID}
+RUN_DIR=/mnt/home/lalejini/data/signal-gp-benchmarking/${BENCHMARK}/${PBS_JOBNAME}__${PBS_ARRAYID}
 
 ### change to the working directory where your code is located
 cd /mnt/home/lalejini/devo_ws/signal-gp-benchmarking/${BENCHMARK}

@@ -4,7 +4,7 @@
 #PBS -l walltime=06:00:00:00
 #PBS -l feature=intel16
 #PBS -l mem=8gb
-#PBS -t 401-500
+#PBS -t 401-450
 #PBS -N Imperative_MsgForking
 
 ### load necessary modules, e.g.

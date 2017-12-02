@@ -36,8 +36,8 @@ constexpr size_t DIR_DOWN = 2;
 constexpr size_t DIR_RIGHT = 3;
 
 // Min and max valid unique idenifiers. Used when generating unique idenifiers for virtual hardware.
-constexpr size_t MIN_UID = 1;           //< Minimum bound on hardware UID. NOTE: This should not overlap 0. A 0 is used to specify no-vote.
-constexpr size_t MAX_UID = 10000;       //< Maximum bound on hardware UID.
+constexpr size_t MIN_UID = 1;             //< Minimum bound on hardware UID. NOTE: This should not overlap 0. A 0 is used to specify no-vote.
+constexpr size_t MAX_UID = 1000000;       //< Maximum bound on hardware UID.
 
 /// Class to manage a consensus experiment.
 ///  - Will be configured based on treatment parameters.
@@ -551,7 +551,7 @@ public:
       // Keep the best program around.
       emp::EliteSelect(*world, 1, 1);
       // Run a tournament for the rest.
-      emp::TournamentSelect(*world, 8, DEME_CNT - 1);
+      emp::TournamentSelect(*world, 4, DEME_CNT - 1);
 
       // Print out in-run summary stats on dominant agent from last generation (which will be the first one).
       std::cout << "Update " << world->GetUpdate();
