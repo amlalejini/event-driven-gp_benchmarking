@@ -35,7 +35,10 @@ EMP_BUILD_CONFIG( PatternMatchingConfig,
   VALUE(POPULATION_INTERVAL, size_t, 100, "Interval to record population summary stats."),
   VALUE(FITNESS_INTERVAL, size_t, 100, "Interval to record fitness summary stats."),
   VALUE(POP_SNAPSHOT_INTERVAL, size_t, 100, "Interval to take a full snapshot of the population."),
-  VALUE(DATA_DIRECTORY, std::string, "./", "Location to dump data output.")
+  VALUE(DATA_DIRECTORY, std::string, "./", "Location to dump data output."),
+  GROUP(RESUME_RUN_GROUP, "Settings for resuming from an existing population."),
+  VALUE(RUN_FROM_EXISTING_POP, bool, false, "Should we resume from an existing pop? If so, be sure to specity existing pop directory setting."),
+  VALUE(EXISTING_POP_LOC, std::string, "./pop_0", "Location to of existing population.")
 )
 
 #endif

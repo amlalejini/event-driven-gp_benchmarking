@@ -336,6 +336,9 @@ protected:
   size_t POPULATION_INTERVAL;
   size_t POP_SNAPSHOT_INTERVAL;   ///< Interval to take full program snapshots of population.
   std::string DATA_DIRECTORY;     ///< Directory in which to store all program output.
+  // Run from pop settings.
+  bool RUN_FROM_EXISTING_POP;
+  std::string EXISTING_POP_LOC;
 
   emp::Ptr<emp::Random> random;   ///< Random number generator. Exp class is responsible for allocation and deallocation.
   emp::Ptr<world_t> world;        ///< Empirical world object. Exp class is responsible for allocation and deallocation.
@@ -379,10 +382,15 @@ public:
     POPULATION_INTERVAL = config.POPULATION_INTERVAL();
     POP_SNAPSHOT_INTERVAL = config.POP_SNAPSHOT_INTERVAL();
     DATA_DIRECTORY = config.DATA_DIRECTORY();
+    RUN_FROM_EXISTING_POP = config.RUN_FROM_EXISTING_POP();
+    EXISTING_POP_LOC = config.EXISTING_POP_LOC();
 
     // Setup the output directory.
     mkdir(DATA_DIRECTORY.c_str(), ACCESSPERMS);
     if (DATA_DIRECTORY.back() != '/') DATA_DIRECTORY += '/';
+
+    // clean up existing population location directory.
+    if (EXISTING_POP_LOC.back() != '/') EXISTING_POP_LOC += '/';
 
     // Make our random number generator.
     random = emp::NewPtr<emp::Random>(RANDOM_SEED);
@@ -483,24 +491,42 @@ public:
       });
     }
 
-    // Configure the ancestor program.
-    program_t ancestor_prog(inst_lib);
-    std::ifstream ancestor_fstream(ANCESTOR_FPATH);
-    if (!ancestor_fstream.is_open()) {
-      std::cout << "Failed to open ancestor program file(" << ANCESTOR_FPATH << "). Exiting..." << std::endl;
-      exit(-1);
-    }
-    ancestor_prog.Load(ancestor_fstream);
-
-    std::cout << " --- Ancestor program: ---" << std::endl;
-    ancestor_prog.PrintProgramFull();
-    std::cout << " -------------------------" << std::endl;
-
     // Configure the world.
     world->SetWellMixed(true);                 // Deme germs are well-mixed. (no need for keeping track of deme-deme spatial information)
     world->SetFitFun([this](Agent & agent) { return this->CalcFitness(agent); });
     world->SetMutFun([this](Agent & agent, emp::Random & rnd) { return this->Mutate(agent, rnd); });
-    world->Inject(ancestor_prog, DEME_CNT);    // Inject a bunch of ancestor deme-germs into the population.
+
+    // Are we resuming from an existing population, or are we starting anew?
+    if (RUN_FROM_EXISTING_POP) {
+      // Configure population from the specified existing population.
+      //  NOTE: This code makes assumptions about the way the existing population is stored and how many .gp files there are.
+      //        -- Assumption is that the population was output by a Snapshot function from this experiment.
+      for (size_t i = 0; i < DEME_CNT; ++i) {
+        program_t prog(inst_lib);
+        std::string prog_fpath = EXISTING_POP_LOC + "prog_" + emp::to_string((int)i) + ".gp";
+        std::ifstream prog_fstream(prog_fpath);
+        std::cout << " Here's a thing: " << prog_fpath << std::endl;
+        if (!prog_fstream.is_open()) {
+          std::cout << "Failed to open program file: " << prog_fpath << std::endl;
+          exit(-1);
+        }
+        prog.Load(prog_fstream);
+        world->Inject(prog, 1);
+      }
+    } else {
+      // Configure the ancestor program.
+      program_t ancestor_prog(inst_lib);
+      std::ifstream ancestor_fstream(ANCESTOR_FPATH);
+      if (!ancestor_fstream.is_open()) {
+        std::cout << "Failed to open ancestor program file(" << ANCESTOR_FPATH << "). Exiting..." << std::endl;
+        exit(-1);
+      }
+      ancestor_prog.Load(ancestor_fstream);
+      std::cout << " --- Ancestor program: ---" << std::endl;
+      ancestor_prog.PrintProgramFull();
+      std::cout << " -------------------------" << std::endl;
+      world->Inject(ancestor_prog, DEME_CNT);    // Inject a bunch of ancestor deme-germs into the population.
+    }
 
     // Setup the systematics output file.
     auto & sys_file = world->SetupSystematicsFile(DATA_DIRECTORY + "systematics.csv");
