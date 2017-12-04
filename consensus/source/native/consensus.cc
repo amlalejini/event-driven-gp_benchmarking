@@ -505,7 +505,6 @@ public:
         program_t prog(inst_lib);
         std::string prog_fpath = EXISTING_POP_LOC + "prog_" + emp::to_string((int)i) + ".gp";
         std::ifstream prog_fstream(prog_fpath);
-        std::cout << " Here's a thing: " << prog_fpath << std::endl;
         if (!prog_fstream.is_open()) {
           std::cout << "Failed to open program file: " << prog_fpath << std::endl;
           exit(-1);
