@@ -82,14 +82,14 @@ BENCHMARK=[benchmark]
 BENCHMARK_DIR=/mnt/home/lalejini/data/signal-gp-benchmarking/${BENCHMARK}
 BASE_RUN_DIR=${BENCHMARK_DIR}/${PBS_JOBNAME}
 RUN_DIR=${BASE_RUN_DIR}:[pop_update]
+CODE_DIR=/mnt/home/lalejini/devo_ws/signal-gp-benchmarking/${BENCHMARK}
 
 ### Change to working directory, do work.
 mkdir -p ${RUN_DIR}
 
 cd ${BENCHMARK_DIR}
-cp ${BASE_RUN_DIR}/ancestor.gp ${RUN_DIR}
 cp ${BASE_RUN_DIR}/configs.cfg ${RUN_DIR}
-cp ${BASE_RUN_DIR}/${BENCHMARK} ${RUN_DIR}
+cp ${CODE_DIR}/${BENCHMARK} ${RUN_DIR}
 cd ${RUN_DIR}
 
 ###./${BENCHMARK} -RANDOM_SEED [random_seed] -RUN_FROM_EXISTING_POP 1 -EXISTING_POP_LOC ${BASE_RUN_DIR}/pop_[pop_update] [run_parameters] > run.log

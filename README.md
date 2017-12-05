@@ -26,8 +26,12 @@ Stretch: how do systems respond to perturbations (antagonistic and neutral)?
   - [x] Add propagule size = 1 treatment (i.e. add inactive trait, repro instruction to set facing neighbor to be active).
     - Q: Should new propagules have a function auto-called by parent repro instruction?
 - [ ] Python utility scripts
-  - [ ] Check for job completion.
+  - [x] Check for job completion.
   - [ ] Generate resub qsub files.
+
+## Data Collection Pipeline
+Command for resubbing consensus benchmarking: python resub.py /mnt/home/lalejini/data/signal-gp-benchmarking/consensus consensus -l -g --walltime 04:00:00:00 --feature intel16 --mem 8gb -u 50000
+
 
 ## Benchmark Tasks/Environments
 To evaluate usefulness of capturing the event-driven paradigm in genetic programming, I am benchmarking Signal GP with and without access to the event-driven paradigm on several environments/tasks.
