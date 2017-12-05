@@ -125,8 +125,6 @@ def main():
     feature_param = args.feature if args.feature else default_feature
     mem_param = args.mem if args.mem else default_mem
 
-    mkdir_p(generated_qsub_loc)
-
     exp_dir = args.directory
     print "Experiment data directory: " + exp_dir
     print "  Final update: " + str(final_update)
@@ -178,6 +176,7 @@ def main():
             print "    %s: %d/%d finished" % (treatment, treatment_cnts[treatment][0], treatment_cnts[treatment][1])
 
     if args.generate_resubs:
+        mkdir_p(generated_qsub_loc)
         # For each unfinished job, generate a HPCC resubmission script.
         for run in run_info:
             # If not finished, generate a qsub file for it.
