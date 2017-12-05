@@ -92,7 +92,7 @@ cp ${BASE_RUN_DIR}/configs.cfg ${RUN_DIR}
 cp ${CODE_DIR}/${BENCHMARK} ${RUN_DIR}
 cd ${RUN_DIR}
 
-###./${BENCHMARK} -RANDOM_SEED [random_seed] -RUN_FROM_EXISTING_POP 1 -EXISTING_POP_LOC ${BASE_RUN_DIR}/pop_[pop_update] [run_parameters] > run.log
+./${BENCHMARK} -RANDOM_SEED [random_seed] -RUN_FROM_EXISTING_POP 1 -EXISTING_POP_LOC ${BASE_RUN_DIR}/pop_[pop_update] [run_parameters] > run.log
 """
 
 def mkdir_p(path):
