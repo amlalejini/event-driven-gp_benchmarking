@@ -80,7 +80,7 @@ module load GNU/5.2
 ### Setup some variables.
 BENCHMARK=[benchmark]
 BENCHMARK_DIR=/mnt/home/lalejini/data/signal-gp-benchmarking/${BENCHMARK}
-BASE_RUN_DIR=${BENCHMARK_DIR}/${PBS_JOBNAME}__${PBS_ARRAYID}
+BASE_RUN_DIR=${BENCHMARK_DIR}/${PBS_JOBNAME}
 RUN_DIR=${BASE_RUN_DIR}:[pop_update]
 
 ### Change to working directory, do work.
