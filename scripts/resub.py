@@ -145,7 +145,6 @@ def main():
     for run in runs:
         run_id = run.split("__")[-1]
         run_treat = "-".join(run.split("-")[:-1])
-        print run_treat
         run_dir = os.path.join(exp_dir, run)
         fitness_contents = None
         with open(os.path.join(run_dir, "fitness.csv"), "r") as fp:
