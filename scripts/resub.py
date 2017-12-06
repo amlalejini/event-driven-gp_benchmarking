@@ -92,7 +92,7 @@ cp ${BASE_RUN_DIR}/configs.cfg ${RUN_DIR}
 cp ${CODE_DIR}/${BENCHMARK} ${RUN_DIR}
 cd ${RUN_DIR}
 
-./${BENCHMARK} -RANDOM_SEED [random_seed] -RUN_FROM_EXISTING_POP 1 -EXISTING_POP_LOC ${BASE_RUN_DIR}/pop_[pop_update] [run_parameters] > run.log
+./${BENCHMARK} -RANDOM_SEED [random_seed] -GENERATIONS [generations] -RUN_FROM_EXISTING_POP 1 -EXISTING_POP_LOC ${BASE_RUN_DIR}/pop_[pop_update] [run_parameters] > run.log
 """
 
 def mkdir_p(path):
@@ -189,6 +189,7 @@ def main():
                 job_name = run  #  Job name: treament-run_id__run_id  -- This needs to match the base
                 pop_update = str(run_info[run]["last_snapshot"])
                 random_seed = str(run_info[run]["run_id"])
+                generations = str(final_update - run_info[run]["last_snapshot"])
                 run_parameters = ""
                 for param in run_params[benchmark][treatment]:
                     run_parameters += " -%s %s" % (str(param), str(run_params[benchmark][treatment][param]))
@@ -201,6 +202,7 @@ def main():
                 qsub = qsub.replace("[pop_update]", pop_update)
                 qsub = qsub.replace("[random_seed]", random_seed)
                 qsub = qsub.replace("[run_parameters]", run_parameters)
+                qsub = qsub.replace("[generations]", generations)
                 # Write everything out to file.
                 with open(os.path.join(generated_qsub_loc, run + ":" + pop_update + ".qsub"), "w") as fp:
                     fp.write(qsub)

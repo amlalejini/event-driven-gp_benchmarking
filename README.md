@@ -27,7 +27,9 @@ Stretch: how do systems respond to perturbations (antagonistic and neutral)?
     - Q: Should new propagules have a function auto-called by parent repro instruction?
 - [ ] Python utility scripts
   - [x] Check for job completion.
-  - [ ] Generate resub qsub files.
+  - [x] Generate resub qsub files.
+  - [x] Submit a directory of qsub files.
+  - [ ] Stitch together original submissions with resubmissions.
 
 ## Data Collection Pipeline
 Command for resubbing consensus benchmarking: python resub.py /mnt/home/lalejini/data/signal-gp-benchmarking/consensus consensus -l -g --walltime 04:00:00:00 --feature intel16 --mem 8gb -u 50000
