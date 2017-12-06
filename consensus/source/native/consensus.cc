@@ -339,6 +339,10 @@ protected:
   // Run from pop settings.
   bool RUN_FROM_EXISTING_POP;
   std::string EXISTING_POP_LOC;
+  // Analysis settings.
+  bool ANALYZE_MODE;
+  size_t ANALYSIS;
+  std::string ANALYZE_AGENT_FPATH;
 
   emp::Ptr<emp::Random> random;   ///< Random number generator. Exp class is responsible for allocation and deallocation.
   emp::Ptr<world_t> world;        ///< Empirical world object. Exp class is responsible for allocation and deallocation.
@@ -384,6 +388,9 @@ public:
     DATA_DIRECTORY = config.DATA_DIRECTORY();
     RUN_FROM_EXISTING_POP = config.RUN_FROM_EXISTING_POP();
     EXISTING_POP_LOC = config.EXISTING_POP_LOC();
+    ANALYZE_MODE = config.ANALYZE_MODE();
+    ANALYSIS = config.ANALYSIS();
+    ANALYZE_AGENT_FPATH = config.ANALYZE_AGENT_FPATH();
 
     // Setup the output directory.
     mkdir(DATA_DIRECTORY.c_str(), ACCESSPERMS);
@@ -496,6 +503,25 @@ public:
     world->SetFitFun([this](Agent & agent) { return this->CalcFitness(agent); });
     world->SetMutFun([this](Agent & agent, emp::Random & rnd) { return this->Mutate(agent, rnd); });
 
+    // Setup the systematics output file.
+    auto & sys_file = world->SetupSystematicsFile(DATA_DIRECTORY + "systematics.csv");
+    sys_file.SetTimingRepeat(SYSTEMATICS_INTERVAL);
+    auto & fit_file = world->SetupFitnessFile(DATA_DIRECTORY + "fitness.csv");
+    fit_file.SetTimingRepeat(FITNESS_INTERVAL);
+    // world->SetupPopulationFile(DATA_DIRECTORY + "population.csv").SetTimingRepeat(POPULATION_INTERVAL);
+  }
+
+  ~ConsensusExp() {
+    world.Delete();
+    eval_deme.Delete();
+    inst_lib.Delete();
+    event_lib.Delete();
+    random.Delete();
+  }
+
+  /// Run in experiment mode. Either load ancestor individual or a specified population.
+  /// Then run evolution for the specified amount of time.
+  void RunExperiment() {
     // Are we resuming from an existing population, or are we starting anew?
     if (RUN_FROM_EXISTING_POP) {
       // Configure population from the specified existing population.
@@ -527,24 +553,6 @@ public:
       world->Inject(ancestor_prog, DEME_CNT);    // Inject a bunch of ancestor deme-germs into the population.
     }
 
-    // Setup the systematics output file.
-    auto & sys_file = world->SetupSystematicsFile(DATA_DIRECTORY + "systematics.csv");
-    sys_file.SetTimingRepeat(SYSTEMATICS_INTERVAL);
-    auto & fit_file = world->SetupFitnessFile(DATA_DIRECTORY + "fitness.csv");
-    fit_file.SetTimingRepeat(FITNESS_INTERVAL);
-    // world->SetupPopulationFile(DATA_DIRECTORY + "population.csv").SetTimingRepeat(POPULATION_INTERVAL);
-  }
-
-  ~ConsensusExp() {
-    world.Delete();
-    eval_deme.Delete();
-    inst_lib.Delete();
-    event_lib.Delete();
-    random.Delete();
-  }
-
-  /// Run the experiment!
-  void Run() {
     size_t full_consensus_time = 0; // These are used for printing summary information about each update to std out.
     size_t best_agent = 0;
     double best_score = 0;
@@ -593,6 +601,67 @@ public:
 
       // Snapshot time?
       if (ud % POP_SNAPSHOT_INTERVAL == 0) Snapshot(ud);
+    }
+  }
+
+  /// Run in analysis mode.
+  void RunAnalysis() {
+    std::cout << "\n\nEntering analysis mode!\n" << std::endl;
+    switch (ANALYSIS) {
+      case 0: { // Analyze a single program specified by ANALZE AGENT FPATH.
+        // Configure the analysis program.
+        program_t analyze_prog(inst_lib);
+        std::ifstream analyze_fstream(ANALYZE_AGENT_FPATH);
+        if (!analyze_fstream.is_open()) {
+          std::cout << "Failed to open analysis program file(" << ANALYZE_AGENT_FPATH << "). Exiting..." << std::endl;
+          exit(-1);
+        }
+        analyze_prog.Load(analyze_fstream);
+        std::cout << " --- Analyzing program: ---" << std::endl;
+        analyze_prog.PrintProgramFull();
+        std::cout << " -------------------------" << std::endl;
+
+        eval_deme->SetProgram(analyze_prog);  // Load agent's program onto evaluation deme.
+        eval_deme->RandomizeUIDS();           // Randomize evaluation deme hardwares' UIDs.
+        size_t full_consensus_time = 0;       // Reset full consensus tracker.
+        // Run the deme for some amount of time.
+        std::cout << "\n\nDEME EVALUATION" << std::endl;
+        for (size_t t = 0; t < DEME_EVAL_TIME; ++t) {
+          std::cout << "=============================== TIME: " << t << " ===============================" << std::endl;
+          eval_deme->SingleAdvance();
+          eval_deme->PrintState();
+          // Was there consensus?
+          std::cout << "\nIs there consensus? ";
+          if (eval_deme->max_vote_cnt == eval_deme->GetSize()) {
+            ++full_consensus_time;
+            std::cout << "Yes!" << std::endl;
+          } else { std::cout << "Nope." << std::endl; }
+        }
+        // Give some summary information.
+        std::cout << "\n\nDEME EVALUATION SUMMARY" << std::endl;
+        Agent agent(analyze_prog);
+        agent.max_consensus = eval_deme->max_vote_cnt;  // max vote count will have max consensus size at end of evaluation.
+        agent.valid_votes = eval_deme->valid_votes.size(); // TODO: check to make sure this is what we're expecting.
+        agent.full_consensus_time = full_consensus_time;
+        double score = CalcFitness(agent);
+        std::cout << "  Max consensus at end of evaluation: " << agent.max_consensus << std::endl;
+        std::cout << "  Valid votes at the end of evaluation: " << agent.valid_votes << std::endl;
+        std::cout << "  Time at consensus during evaluation: " << agent.full_consensus_time << std::endl;
+        std::cout << "  Final score: " << score << std::endl;
+        break; // End analyze single program mode.
+      }
+      default:
+        std::cout << "Unrecognized analysis. (see ANALYZE parameter)" << std::endl;
+        break;
+    }
+  }
+
+  /// Run the experiment!
+  void Run() {
+    if (ANALYZE_MODE) {
+      RunAnalysis();
+    } else {
+      RunExperiment();
     }
   }
 

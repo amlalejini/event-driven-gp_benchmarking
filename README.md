@@ -22,17 +22,25 @@ Stretch: how do systems respond to perturbations (antagonistic and neutral)?
     - Will involve loading a population of programs in, evaluating everything, selecting the highest fitness individual, then collecting stats on that.
 - [ ] Pattern matching:
   - [ ] Analyze mode.
-  - [ ] Update comments.
+  - [x] Update comments.
   - [x] Add propagule size = 1 treatment (i.e. add inactive trait, repro instruction to set facing neighbor to be active).
     - Q: Should new propagules have a function auto-called by parent repro instruction?
 - [ ] Python utility scripts
   - [x] Check for job completion.
   - [x] Generate resub qsub files.
   - [x] Submit a directory of qsub files.
-  - [ ] Stitch together original submissions with resubmissions.
+  - [~] Stitch together original submissions with resubmissions.
 
 ## Data Collection Pipeline
-Command for resubbing consensus benchmarking: python resub.py /mnt/home/lalejini/data/signal-gp-benchmarking/consensus consensus -l -g --walltime 04:00:00:00 --feature intel16 --mem 8gb -u 50000
+1. Use original .qsub files (in each benchmarking directory) to submit initial runs.
+  * i.e. `>> qsub [treatment_name].qsub`
+  * can use `>> resub.py [data dir] [benchmark] -l` to list out finished/unfinished jobs while running.
+2. If anything doesn't finish in given time on HPCC or HPCC kills things off for some reason, use the resub script to generate the appropriate resubmission qsub scripts.
+  * NOTE: only do this once all jobs of a benchmark have either finished or died.
+  * Command for generating resub consensus benchmarking: `python resub.py /mnt/home/lalejini/data/signal-gp-benchmarking/consensus consensus -l -g --walltime 04:00:00:00 --feature intel16 --mem 8gb -u 50000`
+  * Use qsub.py to do the mass .qsub submitting.
+3. Once all resubs of a benchmark have finished. Stitch the resubs together with the original run data using the stitch.py script.
+4. Repeat steps 2 and 3 until everything gets done. 
 
 
 ## Benchmark Tasks/Environments
