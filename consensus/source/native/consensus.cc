@@ -461,6 +461,7 @@ public:
     inst_lib->AddInst("BroadcastMsg", Inst_BroadcastMsg, 0, "Broadcast output memory as message event.", emp::ScopeType::BASIC, 0, {"affinity"});
     // Consensus-specific instructions:
     inst_lib->AddInst("GetUID", Inst_GetUID, 1, "LocalReg[Arg1] = Trait[UID]");
+    inst_lib->AddInst("GetOpinion", Inst_GetOpinion, 1, "LocalReg[Arg1] = Trait[Opinion]");
     inst_lib->AddInst("SetOpinion", Inst_SetOpinion, 1, "Trait[Opinion] = LocalReg[Arg1]");
 
     // Are we forking on a message or not? All that changes are the message event handlers.
@@ -857,6 +858,13 @@ public:
   static void Inst_GetUID(hardware_t & hw, const inst_t & inst) {
     state_t & state = hw.GetCurState();
     state.SetLocal(inst.args[0], hw.GetTrait(TRAIT_ID__UID));
+  }
+
+  /// Instruction: GetOpinion
+  /// Description: Local[Arg1] = Trait[Opinion]
+  static void Inst_GetOpinion(hardware_t & hw, const inst_t & inst) {
+    state_t & state = hw.GetCurState();
+    state.SetLocal(inst.args[0], hw.GetTrait(TRAIT_ID__OPINION));
   }
 
   /// Instruction: SetOpinion
