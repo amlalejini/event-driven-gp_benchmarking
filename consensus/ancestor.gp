@@ -1,6 +1,6 @@
 Fn-0000000000000000:
-  GetUID(0)
-  SetOpinion(0)
+  Nop
+  Nop
   Nop
   Nop
   Nop
