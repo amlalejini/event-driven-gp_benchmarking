@@ -767,7 +767,7 @@ public:
 
   /// Dispatch straight to faced neighbor.
   /// NOTE: needs access to eval_deme to know who neighbors are.
-  void EventDriven__DispatchMessageFacing(hardware_t hw, const event_t & event) {
+  void EventDriven__DispatchMessageFacing(hardware_t & hw, const event_t & event) {
     const size_t facing_id = eval_deme->GetFacing((size_t)hw.GetTrait(TRAIT_ID__LOC));
     hardware_t & rHW = eval_deme->GetHardware(facing_id);
     rHW.QueueEvent(event);
@@ -775,14 +775,14 @@ public:
 
   /// Dispatch to faced neighbor's inbox.
   /// NOTE: needs access to eval_deme to know who neighbors are.
-  void Imperative__DispatchMessageFacing(hardware_t hw, const event_t & event) {
+  void Imperative__DispatchMessageFacing(hardware_t & hw, const event_t & event) {
     const size_t facing_id = eval_deme->GetFacing((size_t)hw.GetTrait(TRAIT_ID__LOC));
     eval_deme->DeliverToInbox(facing_id, event);
   }
 
   /// Dispatch to all of hw's neighbors.
   /// NOTE: needs access to eval_deme to know who neighbors are.
-  void EventDriven__DispatchMessageBroadcast(hardware_t hw, const event_t & event) {
+  void EventDriven__DispatchMessageBroadcast(hardware_t & hw, const event_t & event) {
     const size_t loc_id = (size_t)hw.GetTrait(TRAIT_ID__LOC);
     eval_deme->GetHardware(eval_deme->GetNeighbor(loc_id, DIR_UP)).QueueEvent(event);
     eval_deme->GetHardware(eval_deme->GetNeighbor(loc_id, DIR_DOWN)).QueueEvent(event);
@@ -792,7 +792,7 @@ public:
 
   /// Dispatch to all neighbors' inboxes.
   /// NOTE: needs access to eval_deme to know who neighbors are.
-  void Imperative__DispatchMessageBroadcast(hardware_t hw, const event_t & event) {
+  void Imperative__DispatchMessageBroadcast(hardware_t & hw, const event_t & event) {
     const size_t loc_id = (size_t)hw.GetTrait(TRAIT_ID__LOC);
     eval_deme->DeliverToInbox(eval_deme->GetNeighbor(loc_id, DIR_UP), event);
     eval_deme->DeliverToInbox(eval_deme->GetNeighbor(loc_id, DIR_DOWN), event);
@@ -871,7 +871,7 @@ public:
   /// Description: Retrieve a message from the hardware's associated message inbox if there is a message
   ///              to be retrieved. Used in procedural representation runs.
   /// NOTE: needs access to eval_deme for message inboxes.
-  void Inst_RetrieveMsg(hardware_t hw, const inst_t & inst) {
+  void Inst_RetrieveMsg(hardware_t & hw, const inst_t & inst) {
     const size_t loc_id = (size_t)hw.GetTrait(TRAIT_ID__LOC);
     if (!eval_deme->InboxEmpty(loc_id)) {
       hw.HandleEvent(eval_deme->GetInbox(loc_id).front());  // NOTE: Assumes that Event handler won't mess with inbox.
@@ -881,7 +881,7 @@ public:
 
   /// Instruction: ActivateFacing
   /// Description: Activate neighbor in direction specified by Trait[TRAIT_ID__DIR].
-  void Inst_ActivateFacing(hardware_t hw, const inst_t & inst) {
+  void Inst_ActivateFacing(hardware_t & hw, const inst_t & inst) {
     const size_t loc_id = (size_t)hw.GetTrait(TRAIT_ID__LOC);
     const size_t facing_id = eval_deme->GetFacing(loc_id);
     eval_deme->Activate(facing_id);
