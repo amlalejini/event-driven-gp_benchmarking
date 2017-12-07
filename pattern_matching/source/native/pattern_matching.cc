@@ -27,6 +27,8 @@ constexpr size_t TRAIT_ID__LOC     = 0;  ///< Trait ID that specifies hardware's
 constexpr size_t TRAIT_ID__DIR     = 1;  ///< Trait ID that specifies hardware's orientation.
 constexpr size_t TRAIT_ID__ROLE    = 2;  ///< Trait ID that specifies hardware's current role.
 constexpr size_t TRAIT_ID__ACTIVE  = 3;  ///< Trait ID that specifies whether or not the hardware is currently active.
+constexpr size_t TRAIT_ID__UID     = 4;
+constexpr size_t TRAIT_ID__OPINION = 5;
 
 constexpr size_t NUM_NEIGHBORS = 4;      ///< Number of neighboring locations for each grid location in a deme.
 
@@ -36,11 +38,16 @@ constexpr size_t DIR_LEFT = 1;
 constexpr size_t DIR_DOWN = 2;
 constexpr size_t DIR_RIGHT = 3;
 
+// Min and max valid unique idenifiers. Used when generating unique idenifiers for virtual hardware.
+constexpr size_t MIN_UID = 1;             ///< Minimum bound on hardware UID. NOTE: This should not overlap 0. A 0 is used to specify no-vote.
+constexpr size_t MAX_UID = 1000000;       ///< Maximum bound on hardware UID.
+
 // Utility specifiers for different role values.
 constexpr size_t ROLE_NONE = 0;
 constexpr size_t ROLE_1 = 1;
 constexpr size_t ROLE_2 = 2;
 constexpr size_t ROLE_3 = 3;
+constexpr size_t VALID_ROLE_CNT = 3;
 
 constexpr size_t DEME_WIDTH = 6;  ///< For this experiment, deme size is locked in at 6x6.
 constexpr size_t DEME_HEIGHT = 6;
@@ -105,6 +112,8 @@ public:
     emp::vector<size_t> schedule; ///< Utility vector to store order to give each hardware in the deme a CPU cycle on a single deme update.
     emp::vector<inbox_t> inboxes; ///< Inbox for each hardware in the deme.
 
+    std::unordered_set<size_t> uids;   ///< Set of UIDs currently in use.
+
     emp::Ptr<emp::Random> rnd;  ///< Pointer to a random number generator. NOTE: Deme struct is not responsible for pointer cleanup.
     program_t germ_prog;        ///< Current program loaded onto deme hardware. Initialized to be empty.
 
@@ -117,19 +126,22 @@ public:
     ///  _elib: pointer to event library that hardware will use. NOTE: Deme struct is not responsible for pointer cleanup.
     Deme(emp::Ptr<emp::Random> _rnd, size_t _w, size_t _h, size_t _ibox_cap, emp::Ptr<inst_lib_t> _ilib, emp::Ptr<event_lib_t> _elib, bool _def_active=true)
       : grid(), width(_w), height(_h), inbox_capacity(_ibox_cap), default_active(_def_active),
-        schedule(width*height), inboxes(width*height),
+        schedule(width*height), inboxes(width*height), uids(),
         rnd(_rnd), germ_prog(_ilib)
     {
       // Fill out the grid with hardware.
       for (size_t i = 0; i < width * height; ++i) {
         grid.emplace_back(_ilib, _elib, rnd);
         schedule[i] = i;
+        uids.emplace(i+1);  // i+1 to avoid giving out a UID of zero.
         hardware_t & cpu = grid.back();
         // Set hardware traits to valid initial values.
         cpu.SetTrait(TRAIT_ID__LOC, i);
         cpu.SetTrait(TRAIT_ID__DIR, 0);       // We'll start everyone out facing up.
         cpu.SetTrait(TRAIT_ID__ROLE, ROLE_NONE);
         cpu.SetTrait(TRAIT_ID__ACTIVE, default_active);    // Start everyone out as active by default.
+        cpu.SetTrait(TRAIT_ID__UID, i+1);
+        cpu.SetTrait(TRAIT_ID__OPINION, 0);
       }
     }
 
@@ -143,14 +155,18 @@ public:
     /// Will want to use SetProgram function before trying to run the deme.
     void Reset() {
       germ_prog.Clear();
+      uids.clear();
       for (size_t i = 0; i < grid.size(); ++i) {
         inboxes[i].clear();
         schedule[i] = i;          // Re-jigger the schedule ordering.
+        uids.emplace(i+1);
         grid[i].ResetHardware();  // Reset CPU hardware and traits (below).
         grid[i].SetTrait(TRAIT_ID__LOC, i);
         grid[i].SetTrait(TRAIT_ID__DIR, 0);
         grid[i].SetTrait(TRAIT_ID__ROLE, ROLE_NONE);
         grid[i].SetTrait(TRAIT_ID__ACTIVE, default_active);
+        grid[i].SetTrait(TRAIT_ID__UID, i+1);
+        grid[i].SetTrait(TRAIT_ID__OPINION, 0);
       }
     }
 
@@ -229,6 +245,8 @@ public:
     /// Get neighbor ID faced by hardware unit specified by id.
     size_t GetFacing(size_t id) const { return GetNeighbor(id, (size_t)grid[id].GetTrait(TRAIT_ID__DIR)); }
 
+    bool IsActive(size_t id) const { return (bool)grid[id].GetTrait(TRAIT_ID__ACTIVE); }
+
     bool InboxFull(size_t id) const { return inboxes[id].size() >= inbox_capacity; }
     bool InboxEmpty(size_t id) const { return inboxes[id].empty(); }
 
@@ -236,8 +254,23 @@ public:
     hardware_t & GetHardware(size_t id) { return grid[id]; }
 
     void DeliverToInbox(size_t id, const event_t & event) {
-      while (InboxFull(id)) inboxes[id].pop_front(); // Make room for new message in inbox. Remove oldest first.
-      inboxes[id].emplace_back(event);
+      if (IsActive(id)) {
+        while (InboxFull(id)) inboxes[id].pop_front(); // Make room for new message in inbox. Remove oldest first.
+        inboxes[id].emplace_back(event);
+      }
+    }
+
+    /// Randomize unique identifiers for each agent (range of each: [MIN_UID:MAX_UID]). Function
+    /// ensures uniqueness.
+    void RandomizeUIDS() {
+      emp_assert(MAX_UID - MIN_UID > grid.size());
+      uids.clear();
+      for (size_t i = 0; i < grid.size(); ++i) {
+        size_t val = rnd->GetUInt(MIN_UID, MAX_UID);
+        while (emp::Has(uids, val)) { val = rnd->GetUInt(MIN_UID, MAX_UID); }
+        grid[i].SetTrait(TRAIT_ID__UID, val);
+        uids.emplace(val);
+      }
     }
 
     void Activate(size_t id) { grid[id].SetTrait(TRAIT_ID__ACTIVE, 1); }
@@ -255,7 +288,7 @@ public:
       // Distribute the CPU cycles.
       for (size_t i = 0; i < schedule.size(); ++i) {
         hardware_t & cpu = grid[schedule[i]];
-        if (cpu.GetTrait(TRAIT_ID__ACTIVE)) cpu.SingleProcess();
+        if (IsActive(schedule[i])) cpu.SingleProcess();
       }
     }
 
@@ -275,6 +308,7 @@ public:
       os << "==== DEME STATE ====\n";
       for (size_t i = 0; i < grid.size(); ++i) {
         os << "--- Agent @ (" << GetLocX(i) << ", " << GetLocY(i) << ") ---\n";
+        os << "Is active? " << IsActive(i) << "\n";
         grid[i].PrintState(os); os << "\n";
       }
     }
@@ -319,6 +353,10 @@ protected:
   // Run from pop settings.
   bool RUN_FROM_EXISTING_POP;
   std::string EXISTING_POP_LOC;
+  // Analysis mode settings.
+  bool ANALYZE_MODE;
+  size_t ANALYSIS;
+  std::string ANALYZE_AGENT_FPATH;
 
   emp::Ptr<emp::Random> random;   ///< Random number generator. Exp class is responsible for allocation and deallocation.
   emp::Ptr<world_t> world;        ///< Empirical world object. Exp class is responsible for allocation and deallocation.
@@ -367,6 +405,9 @@ public:
     DATA_DIRECTORY = config.DATA_DIRECTORY();
     RUN_FROM_EXISTING_POP = config.RUN_FROM_EXISTING_POP();
     EXISTING_POP_LOC = config.EXISTING_POP_LOC();
+    ANALYZE_MODE = config.ANALYZE_MODE();
+    ANALYSIS = config.ANALYSIS();
+    ANALYZE_AGENT_FPATH = config.ANALYZE_AGENT_FPATH();
 
     // Do a little parameter cleaning:
     //  - Make sure propagule size is <= deme size.
@@ -482,9 +523,16 @@ public:
     inst_lib->AddInst("SendMsgFacing", Inst_SendMsgFacing, 0, "Send output memory as message event to faced neighbor.", emp::ScopeType::BASIC, 0, {"affinity"});
     inst_lib->AddInst("BroadcastMsg", Inst_BroadcastMsg, 0, "Broadcast output memory as message event.", emp::ScopeType::BASIC, 0, {"affinity"});
     // Role-related instructions:
+    inst_lib->AddInst("GetRole", Inst_GetRole, 1, "Local[Arg1] = Trait[Role]");
+    inst_lib->AddInst("SetRole", Inst_SetRole, 1, "Trait[Role] = (Local[Arg1] mod 3)+1");
     inst_lib->AddInst("SetRole1", Inst_SetRole1, 0, "Set role ID to 1.");
     inst_lib->AddInst("SetRole2", Inst_SetRole2, 0, "Set role ID to 2.");
     inst_lib->AddInst("SetRole3", Inst_SetRole3, 0, "Set role ID to 3.");
+    // Consensus-specific instructions:
+    inst_lib->AddInst("GetUID", Inst_GetUID, 1, "LocalReg[Arg1] = Trait[UID]");
+    inst_lib->AddInst("GetOpinion", Inst_GetOpinion, 1, "LocalReg[Arg1] = Trait[Opinion]");
+    inst_lib->AddInst("SetOpinion", Inst_SetOpinion, 1, "Trait[Opinion] = LocalReg[Arg1]");
+
 
     // Are we forking on a message or not? All that changes are the message event handlers.
     if (FORK_ON_MESSAGE) {
@@ -535,6 +583,24 @@ public:
     world->SetFitFun([this](Agent & agent) { return this->CalcFitness(agent); });
     world->SetMutFun([this](Agent & agent, emp::Random & rnd) { return this->Mutate(agent, rnd); });
 
+    // Setup the systematics output file.
+    auto & sys_file = world->SetupSystematicsFile(DATA_DIRECTORY + "systematics.csv");
+    sys_file.SetTimingRepeat(SYSTEMATICS_INTERVAL);
+    auto & fit_file = world->SetupFitnessFile(DATA_DIRECTORY + "fitness.csv");
+    fit_file.SetTimingRepeat(FITNESS_INTERVAL);
+  }
+
+  ~PatternMatchingExp() {
+    world.Delete();
+    eval_deme.Delete();
+    inst_lib.Delete();
+    event_lib.Delete();
+    random.Delete();
+  }
+
+  /// Run in experiment mode. Either start experiment with single ancestor or start from a
+  /// specified population.
+  void RunExperiment() {
     // Are we resuming from an existing population, or are we starting anew?
     if (RUN_FROM_EXISTING_POP) {
       // Configure population from the specified existing population.
@@ -566,50 +632,6 @@ public:
       world->Inject(ancestor_prog, DEME_CNT);    // Inject a bunch of ancestor deme-germs into the population.
     }
 
-    // Setup the systematics output file.
-    auto & sys_file = world->SetupSystematicsFile(DATA_DIRECTORY + "systematics.csv");
-    sys_file.SetTimingRepeat(SYSTEMATICS_INTERVAL);
-    auto & fit_file = world->SetupFitnessFile(DATA_DIRECTORY + "fitness.csv");
-    fit_file.SetTimingRepeat(FITNESS_INTERVAL);
-
-    // Some debugging...
-    // eval_deme->SetProgram(ancestor_prog);
-    // eval_deme->PrintRoles();
-    // for (size_t i = 0; i < 16; ++i) {
-    //   std::cout << "-------------------- " << i << " --------------------" << std::endl;
-    //   eval_deme->SingleAdvance();
-    //   eval_deme->PrintRoles();
-    //   std::cout << "-----------------------------------------" << std::endl;
-    // }
-    // size_t max_pattern_score = 0;
-    // // Compute pattern matching score.
-    // // - Reset pattern scores for each pattern.
-    // emp::vector<size_t> pattern_scores(NUM_PATTERNS);
-    // for (size_t k = 0; k < pattern_scores.size(); ++k) { pattern_scores[k] = 0; }
-    // for (size_t i = 0; i < eval_deme->grid.size(); ++i) {
-    //   const size_t x = eval_deme->GetLocX(i);
-    //   const size_t y = eval_deme->GetLocY(i);
-    //   const size_t role = eval_deme->grid[i].GetTrait(TRAIT_ID__ROLE);
-    //   for (size_t pID = 0; pID < patterns.size(); ++pID) {
-    //     if (patterns[pID][y][x] == role) ++pattern_scores[pID];
-    //     if (pattern_scores[pID] > max_pattern_score) max_pattern_score = pattern_scores[pID];
-    //   }
-    // }
-    // std::cout << "Pattern scores:";
-    // for (size_t i = 0; i < pattern_scores.size(); ++i) std::cout << " " << pattern_scores[i];
-    // std::cout << std::endl;
-  }
-
-  ~PatternMatchingExp() {
-    world.Delete();
-    eval_deme.Delete();
-    inst_lib.Delete();
-    event_lib.Delete();
-    random.Delete();
-  }
-
-  /// Run the experiment!
-  void Run() {
     emp::vector<size_t> pattern_scores(NUM_PATTERNS);
     size_t max_score = 0;
     for (size_t ud = 0; ud <= GENERATIONS; ++ud) {
@@ -617,6 +639,7 @@ public:
       // Evaluate each agent.
       for (size_t id = 0; id < world->GetSize(); ++id) {
         eval_deme->SetProgram(world->GetGenomeAt(id));  // Load agent's program onto evaluation deme.
+        eval_deme->RandomizeUIDS();
         // If !DEME_PROP_FULL:
         if (!DEME_PROP_FULL) {
           // We need to activate a number of hardwares equal to DEME_PROP_SIZE
@@ -659,6 +682,103 @@ public:
 
       // Snapshot time?
       if (ud % POP_SNAPSHOT_INTERVAL == 0) Snapshot(ud);
+    }
+  }
+
+  void RunAnalysis() {
+    std::cout << "\n\nEntering analysis mode!\n" << std::endl;
+    switch(ANALYSIS) {
+      case 0: { // Analyze a single program specified by ANALYZE AGENT FPATH.
+        // Configure the analysis program.
+        program_t analyze_prog(inst_lib);
+        std::ifstream analyze_fstream(ANALYZE_AGENT_FPATH);
+        if (!analyze_fstream.is_open()) {
+          std::cout << "Failed to open analysis program file(" << ANALYZE_AGENT_FPATH << "). Exiting..." << std::endl;
+          exit(-1);
+        }
+        analyze_prog.Load(analyze_fstream);
+        std::cout << " --- Analyzing program: ---" << std::endl;
+        analyze_prog.PrintProgramFull();
+        std::cout << " -------------------------" << std::endl;
+
+        emp::vector<size_t> pattern_scores(NUM_PATTERNS);
+
+        eval_deme->SetProgram(analyze_prog);
+        eval_deme->RandomizeUIDS();
+        // If !DEME_PROP_FULL:
+        if (!DEME_PROP_FULL) {
+          // We need to activate a number of hardwares equal to DEME_PROP_SIZE
+          emp::Shuffle(*random, eval_deme->schedule);
+          for (size_t i = 0; i < DEME_PROP_SIZE; ++i) { eval_deme->Activate(eval_deme->schedule[i]); }
+        }
+        // Run the deme for some amount of time.
+        std::cout << "\n\nDEME EVALUATION" << std::endl;
+        for (size_t t = 0; t < DEME_EVAL_TIME; ++t) {
+          std::cout << "=============================== TIME: " << t << " ===============================" << std::endl;
+          eval_deme->SingleAdvance();
+          eval_deme->PrintRoles();
+          std::cout << std::endl;
+          eval_deme->PrintState();
+        }
+        // Evaluate deme performance.
+        std::cout << "\n\nDEME PERFORMANCE INFORMATION: " << std::endl;
+        // Compute some relevant information about deme performance.
+        Agent agent(analyze_prog);
+        agent.max_pattern_score = 0;
+        // Compute pattern matching score.
+        // - Reset pattern scores for each pattern.
+        for (size_t k = 0; k < pattern_scores.size(); ++k) { pattern_scores[k] = 0; }
+        for (size_t i = 0; i < eval_deme->grid.size(); ++i) {
+          const size_t x = eval_deme->GetLocX(i);
+          const size_t y = eval_deme->GetLocY(i);
+          const size_t role = eval_deme->grid[i].GetTrait(TRAIT_ID__ROLE);
+          for (size_t pID = 0; pID < patterns.size(); ++pID) {
+            if (patterns[pID][y][x] == role) ++pattern_scores[pID];
+            if (pattern_scores[pID] > agent.max_pattern_score) agent.max_pattern_score = pattern_scores[pID];
+          }
+        }
+        std::cout << "  Deme fitness: " << CalcFitness(agent) << std::endl;
+        eval_deme->PrintRoles();
+        break;
+      }
+      default:
+        std::cout << "Unrecognized analysis. (see ANALYZE parameter)" << std::endl;
+        break;
+    }
+
+    // eval_deme->SetProgram(ancestor_prog);
+    // eval_deme->PrintRoles();
+    // for (size_t i = 0; i < 16; ++i) {
+    //   std::cout << "-------------------- " << i << " --------------------" << std::endl;
+    //   eval_deme->SingleAdvance();
+    //   eval_deme->PrintRoles();
+    //   std::cout << "-----------------------------------------" << std::endl;
+    // }
+    // size_t max_pattern_score = 0;
+    // // Compute pattern matching score.
+    // // - Reset pattern scores for each pattern.
+    // emp::vector<size_t> pattern_scores(NUM_PATTERNS);
+    // for (size_t k = 0; k < pattern_scores.size(); ++k) { pattern_scores[k] = 0; }
+    // for (size_t i = 0; i < eval_deme->grid.size(); ++i) {
+    //   const size_t x = eval_deme->GetLocX(i);
+    //   const size_t y = eval_deme->GetLocY(i);
+    //   const size_t role = eval_deme->grid[i].GetTrait(TRAIT_ID__ROLE);
+    //   for (size_t pID = 0; pID < patterns.size(); ++pID) {
+    //     if (patterns[pID][y][x] == role) ++pattern_scores[pID];
+    //     if (pattern_scores[pID] > max_pattern_score) max_pattern_score = pattern_scores[pID];
+    //   }
+    // }
+    // std::cout << "Pattern scores:";
+    // for (size_t i = 0; i < pattern_scores.size(); ++i) std::cout << " " << pattern_scores[i];
+    // std::cout << std::endl;
+  }
+
+  /// Run the experiment!
+  void Run() {
+    if (ANALYZE_MODE) {
+      RunAnalysis();
+    } else {
+      RunExperiment();
     }
   }
 
@@ -848,6 +968,16 @@ public:
     hw.TriggerEvent("MessageBroadcast", inst.affinity, state.output_mem, {"broadcast"});
   }
 
+  static void Inst_GetRole(hardware_t & hw, const inst_t & inst) {
+    state_t & state = hw.GetCurState();
+    state.SetLocal(inst.args[0], hw.GetTrait(TRAIT_ID__ROLE));
+  }
+
+  static void Inst_SetRole(hardware_t & hw, const inst_t & inst) {
+    state_t & state = hw.GetCurState();
+    hw.SetTrait(TRAIT_ID__ROLE, emp::Mod((int)state.GetLocal(inst.args[0]), VALID_ROLE_CNT) + 1);
+  }
+
   static void Inst_SetRole1(hardware_t & hw, const inst_t & inst) {
     hw.SetTrait(TRAIT_ID__ROLE, ROLE_1);
   }
@@ -858,6 +988,28 @@ public:
 
   static void Inst_SetRole3(hardware_t & hw, const inst_t & inst) {
     hw.SetTrait(TRAIT_ID__ROLE, ROLE_3);
+  }
+
+  /// Instruction: GetUID
+  /// Description: Local[Arg1] = Trait[UID]
+  static void Inst_GetUID(hardware_t & hw, const inst_t & inst) {
+    state_t & state = hw.GetCurState();
+    state.SetLocal(inst.args[0], hw.GetTrait(TRAIT_ID__UID));
+  }
+
+  /// Instruction: GetOpinion
+  /// Description: Local[Arg1] = Trait[Opinion]
+  static void Inst_GetOpinion(hardware_t & hw, const inst_t & inst) {
+    state_t & state = hw.GetCurState();
+    state.SetLocal(inst.args[0], hw.GetTrait(TRAIT_ID__OPINION));
+  }
+
+  /// Instruction: SetOpinion
+  /// Description: Trait[Opinion] = Local[Arg1]
+  static void Inst_SetOpinion(hardware_t & hw, const inst_t & inst) {
+    state_t & state = hw.GetCurState();
+    double val = state.AccessLocal(inst.args[0]);
+    if (val > 0) hw.SetTrait(TRAIT_ID__OPINION, (int)val);
   }
 
   /// Instruction: Fork

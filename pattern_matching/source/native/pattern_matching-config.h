@@ -38,7 +38,11 @@ EMP_BUILD_CONFIG( PatternMatchingConfig,
   VALUE(DATA_DIRECTORY, std::string, "./", "Location to dump data output."),
   GROUP(RESUME_RUN_GROUP, "Settings for resuming from an existing population."),
   VALUE(RUN_FROM_EXISTING_POP, bool, false, "Should we resume from an existing pop? If so, be sure to specity existing pop directory setting."),
-  VALUE(EXISTING_POP_LOC, std::string, "./pop_0", "Location to of existing population.")
+  VALUE(EXISTING_POP_LOC, std::string, "./pop_0", "Location to of existing population."),
+  GROUP(ANALYZE_MODE_GROUP, "Settings for analyzing consensus results."),
+  VALUE(ANALYZE_MODE, bool, false, "Are we running in analyze mode?"),
+  VALUE(ANALYSIS, size_t, 0, "Which analysis should we run?\n0: Analyze a single program, specified by ANALYZE_AGENT_FPATH."),
+  VALUE(ANALYZE_AGENT_FPATH, std::string, "ancestor.gp", "Path to single agent program to analzye.")
 )
 
 #endif
