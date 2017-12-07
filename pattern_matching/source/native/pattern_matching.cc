@@ -43,10 +43,10 @@ constexpr size_t MIN_UID = 1;             ///< Minimum bound on hardware UID. NO
 constexpr size_t MAX_UID = 1000000;       ///< Maximum bound on hardware UID.
 
 // Utility specifiers for different role values.
-constexpr size_t ROLE_NONE = 0;
-constexpr size_t ROLE_1 = 1;
-constexpr size_t ROLE_2 = 2;
-constexpr size_t ROLE_3 = 3;
+constexpr size_t ROLE_NONE = 3;
+constexpr size_t ROLE_1 = 0;
+constexpr size_t ROLE_2 = 1;
+constexpr size_t ROLE_3 = 2;
 constexpr size_t VALID_ROLE_CNT = 3;
 
 constexpr size_t DEME_WIDTH = 6;  ///< For this experiment, deme size is locked in at 6x6.
@@ -447,12 +447,12 @@ public:
       affinity_table[i].SetByte(0, (uint8_t)i);
     }
 
-    emp::vector<emp::vector<size_t>> templates = {{1,1,2,2,3,3},
-                                                  {3,1,1,2,2,3},
-                                                  {3,3,1,1,2,2},
-                                                  {2,3,3,1,1,2},
-                                                  {2,2,3,3,1,1},
-                                                  {1,2,2,3,3,1}};
+    emp::vector<emp::vector<size_t>> templates = {{1,1,2,2,0,0},
+                                                  {0,1,1,2,2,0},
+                                                  {0,0,1,1,2,2},
+                                                  {2,0,0,1,1,2},
+                                                  {2,2,0,0,1,1},
+                                                  {1,2,2,0,0,1}};
     // For each possible pattern: fill out ROLE configuration.
     // Fill out row patterns.
     for (size_t pID = 0; pID < templates.size(); ++pID) {
@@ -511,7 +511,7 @@ public:
     inst_lib->AddInst("Input", hardware_t::Inst_Input, 2, "Input memory Arg1 => Local memory Arg2.");
     inst_lib->AddInst("Output", hardware_t::Inst_Output, 2, "Local memory Arg1 => Output memory Arg2.");
     inst_lib->AddInst("Commit", hardware_t::Inst_Commit, 2, "Local memory Arg1 => Shared memory Arg2.");
-    inst_lib->AddInst("Pull", hardware_t::Inst_Pull, 2, "Shared memory Arg1 => Shared memory Arg2.");
+    inst_lib->AddInst("Pull", hardware_t::Inst_Pull, 2, "Shared memory Arg1 => Local memory Arg2.");
     inst_lib->AddInst("Nop", hardware_t::Inst_Nop, 0, "No operation.");
     // Orientation-related instructions:
     inst_lib->AddInst("RotCW", Inst_RotCW, 0, "Rotate orientation clockwise (90 degrees) once.");
@@ -528,6 +528,7 @@ public:
     inst_lib->AddInst("SetRole1", Inst_SetRole1, 0, "Set role ID to 1.");
     inst_lib->AddInst("SetRole2", Inst_SetRole2, 0, "Set role ID to 2.");
     inst_lib->AddInst("SetRole3", Inst_SetRole3, 0, "Set role ID to 3.");
+    inst_lib->AddInst("GetRoleCnt", Inst_GetRoleCnt, 1, "Local[Arg1] = NUM ROLES");
     // Consensus-specific instructions:
     inst_lib->AddInst("GetUID", Inst_GetUID, 1, "LocalReg[Arg1] = Trait[UID]");
     inst_lib->AddInst("GetOpinion", Inst_GetOpinion, 1, "LocalReg[Arg1] = Trait[Opinion]");
@@ -975,7 +976,7 @@ public:
 
   static void Inst_SetRole(hardware_t & hw, const inst_t & inst) {
     state_t & state = hw.GetCurState();
-    hw.SetTrait(TRAIT_ID__ROLE, emp::Mod((int)state.GetLocal(inst.args[0]), VALID_ROLE_CNT) + 1);
+    hw.SetTrait(TRAIT_ID__ROLE, emp::Mod((int)state.AccessLocal(inst.args[0]), VALID_ROLE_CNT));
   }
 
   static void Inst_SetRole1(hardware_t & hw, const inst_t & inst) {
@@ -988,6 +989,11 @@ public:
 
   static void Inst_SetRole3(hardware_t & hw, const inst_t & inst) {
     hw.SetTrait(TRAIT_ID__ROLE, ROLE_3);
+  }
+
+  static void Inst_GetRoleCnt(hardware_t & hw, const inst_t & inst) {
+    state_t & state = hw.GetCurState();
+    state.SetLocal(inst.args[0], ROLE_NONE);
   }
 
   /// Instruction: GetUID

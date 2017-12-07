@@ -21,6 +21,7 @@ Stretch: how do systems respond to perturbations (antagonistic and neutral)?
   - [ ] Analyze mode
     - Will involve loading a population of programs in, evaluating everything, selecting the highest fitness individual, then collecting stats on that.
 - [ ] Pattern matching:
+  - [ ] Add clumped vs. random propagules option.
   - [ ] Analyze mode.
   - [x] Update comments.
   - [x] Add propagule size = 1 treatment (i.e. add inactive trait, repro instruction to set facing neighbor to be active).
@@ -29,7 +30,7 @@ Stretch: how do systems respond to perturbations (antagonistic and neutral)?
   - [x] Check for job completion.
   - [x] Generate resub qsub files.
   - [x] Submit a directory of qsub files.
-  - [~] Stitch together original submissions with resubmissions.
+  - [x] Stitch together original submissions with resubmissions.
 
 ## Data Collection Pipeline
 1. Use original .qsub files (in each benchmarking directory) to submit initial runs.
@@ -40,7 +41,7 @@ Stretch: how do systems respond to perturbations (antagonistic and neutral)?
   * Command for generating resub consensus benchmarking: `python resub.py /mnt/home/lalejini/data/signal-gp-benchmarking/consensus consensus -l -g --walltime 04:00:00:00 --feature intel16 --mem 8gb -u 50000`
   * Use qsub.py to do the mass .qsub submitting.
 3. Once all resubs of a benchmark have finished. Stitch the resubs together with the original run data using the stitch.py script.
-4. Repeat steps 2 and 3 until everything gets done. 
+4. Repeat steps 2 and 3 until everything gets done.
 
 
 ## Benchmark Tasks/Environments
