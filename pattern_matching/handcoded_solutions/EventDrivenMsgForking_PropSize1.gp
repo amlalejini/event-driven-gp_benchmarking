@@ -27,8 +27,6 @@ Fn-0000000000000000:
   ActivateFacing
   SendMsgFacing()[0000000011111111]
 
-  While(15)
-  Close
 
 Fn-1111111111111111:
   Input(8,8)
