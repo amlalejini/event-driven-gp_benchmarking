@@ -277,6 +277,34 @@ public:
 
     void Deactivate(size_t id) { grid[id].SetTrait(TRAIT_ID__ACTIVE, 0); }
 
+    void ActivatePropagule(size_t prop_size, bool clumpy=false) {
+      // prop_size can't be larger than deme size.
+      if (prop_size > grid.size()) prop_size = grid.size();
+      if (clumpy) {
+        size_t hw_id = rnd->GetUInt(0, grid.size());
+        size_t prop_cnt = 0;
+        size_t dir = 0;
+        while (prop_cnt < prop_size) {
+          if (!IsActive(hw_id)) {
+            Activate(hw_id); prop_cnt += 1;
+          } else {
+            size_t r_dir = (dir + 1) % NUM_NEIGHBORS;
+            size_t r_id = GetNeighbor(hw_id, r_dir);
+            if (!IsActive(r_id)) {
+              dir = r_dir; hw_id = r_id;
+            } else {
+              hw_id = GetNeighbor(hw_id, dir);
+            }
+          }
+        }
+      } else {
+        // We need to activate a number of hardwares equal to DEME_PROP_SIZE
+        emp::Shuffle(*rnd, schedule);
+        for (size_t i = 0; i < prop_size; ++i) { Activate(schedule[i]); }
+      }
+    }
+
+
     /// Advance deme by t timesteps. For each timestep, do a single advance of deme.
     void Advance(size_t t = 1) { for (size_t i = 0; i < t; ++i) SingleAdvance(); }
 
@@ -298,6 +326,16 @@ public:
         if (!GetLocX(i)) os << "\n";
         else os << " ";
         os << grid[i].GetTrait(TRAIT_ID__ROLE);
+      }
+      os << "\n=========================\n";
+    }
+
+    void PrintActive(std::ostream & os=std::cout) {
+      os << "========= Active =========";
+      for (size_t i = 0; i < grid.size(); ++i) {
+        if (!GetLocX(i)) os << "\n";
+        else os << " ";
+        os << grid[i].GetTrait(TRAIT_ID__ACTIVE);
       }
       os << "\n=========================\n";
     }
@@ -335,6 +373,7 @@ protected:
   size_t DEME_EVAL_TIME;     ///< How long should each deme get to evaluate?
   bool DEME_PROP_FULL;
   size_t DEME_PROP_SIZE;
+  bool DEME_PROP_CLUMPY;
   // Mutation-specific settings.
   size_t PROG_MAX_FUNC_CNT;
   size_t PROG_MAX_FUNC_LEN;
@@ -408,6 +447,7 @@ public:
     ANALYZE_MODE = config.ANALYZE_MODE();
     ANALYSIS = config.ANALYSIS();
     ANALYZE_AGENT_FPATH = config.ANALYZE_AGENT_FPATH();
+    DEME_PROP_CLUMPY = config.DEME_PROP_CLUMPY();
 
     // Do a little parameter cleaning:
     //  - Make sure propagule size is <= deme size.
@@ -642,11 +682,7 @@ public:
         eval_deme->SetProgram(world->GetGenomeAt(id));  // Load agent's program onto evaluation deme.
         eval_deme->RandomizeUIDS();
         // If !DEME_PROP_FULL:
-        if (!DEME_PROP_FULL) {
-          // We need to activate a number of hardwares equal to DEME_PROP_SIZE
-          emp::Shuffle(*random, eval_deme->schedule);
-          for (size_t i = 0; i < DEME_PROP_SIZE; ++i) { eval_deme->Activate(eval_deme->schedule[i]); }
-        }
+        if (!DEME_PROP_FULL) { eval_deme->ActivatePropagule(DEME_PROP_SIZE, DEME_PROP_CLUMPY); }
         // Run the deme for some amount of time.
         for (size_t t = 0; t < DEME_EVAL_TIME; ++t) { eval_deme->SingleAdvance(); }
         // Compute some relevant information about deme performance.
@@ -707,11 +743,7 @@ public:
         eval_deme->SetProgram(analyze_prog);
         eval_deme->RandomizeUIDS();
         // If !DEME_PROP_FULL:
-        if (!DEME_PROP_FULL) {
-          // We need to activate a number of hardwares equal to DEME_PROP_SIZE
-          emp::Shuffle(*random, eval_deme->schedule);
-          for (size_t i = 0; i < DEME_PROP_SIZE; ++i) { eval_deme->Activate(eval_deme->schedule[i]); }
-        }
+        if (!DEME_PROP_FULL) { eval_deme->ActivatePropagule(DEME_PROP_SIZE, DEME_PROP_CLUMPY); }
         // Run the deme for some amount of time.
         std::cout << "\n\nDEME EVALUATION" << std::endl;
         for (size_t t = 0; t < DEME_EVAL_TIME; ++t) {
@@ -719,7 +751,8 @@ public:
           eval_deme->SingleAdvance();
           eval_deme->PrintRoles();
           std::cout << std::endl;
-          eval_deme->PrintState();
+          eval_deme->PrintActive();
+          // eval_deme->PrintState();
         }
         // Evaluate deme performance.
         std::cout << "\n\nDEME PERFORMANCE INFORMATION: " << std::endl;
