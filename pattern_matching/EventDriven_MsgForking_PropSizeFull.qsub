@@ -5,7 +5,7 @@
 #PBS -l feature=intel16
 #PBS -l mem=8gb
 #PBS -t 301-350
-#PBS -N EventDriven_MsgForking
+#PBS -N EventDriven_MsgForking_PropSizeFull
 
 ### load necessary modules, e.g.
 module load powertools

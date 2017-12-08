@@ -19,18 +19,18 @@ Stretch: how do systems respond to perturbations (antagonistic and neutral)?
 ## Todos:
 - [ ] Consensus
   - [ ] Analyze mode
-    - Will involve loading a population of programs in, evaluating everything, selecting the highest fitness individual, then collecting stats on that.
 - [ ] Pattern matching:
-  - [ ] Add clumped vs. random propagules option.
+  - [x] Add clumped vs. random propagules option.
   - [ ] Analyze mode.
   - [x] Update comments.
-  - [x] Add propagule size = 1 treatment (i.e. add inactive trait, repro instruction to set facing neighbor to be active).
-    - Q: Should new propagules have a function auto-called by parent repro instruction?
 - [ ] Python utility scripts
   - [x] Check for job completion.
   - [x] Generate resub qsub files.
   - [x] Submit a directory of qsub files.
   - [x] Stitch together original submissions with resubmissions.
+  - [ ] Aggregate summary data.
+  - [ ] R/Python analysis scripts.
+- [ ] Do a comment sweep.
 
 ## Data Collection Pipeline
 1. Use original .qsub files (in each benchmarking directory) to submit initial runs.

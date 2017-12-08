@@ -4,8 +4,8 @@
 #PBS -l walltime=06:00:00:00
 #PBS -l feature=intel16
 #PBS -l mem=8gb
-#PBS -t 401-450
-#PBS -N Imperative_MsgForking
+#PBS -t 501-550
+#PBS -N Imperative_MsgNonForking_PropSizeFull
 
 ### load necessary modules, e.g.
 module load powertools
@@ -21,4 +21,4 @@ cp ./ancestor.gp ${RUN_DIR}
 cp ./configs.cfg ${RUN_DIR}
 cp ./${BENCHMARK} ${RUN_DIR}
 cd ${RUN_DIR}
-./${BENCHMARK} -RANDOM_SEED ${PBS_ARRAYID} -EVENT_DRIVEN 0 -FORK_ON_MESSAGE 1 -DEME_PROP_FULL 1 > run.log
+./${BENCHMARK} -RANDOM_SEED ${PBS_ARRAYID} -EVENT_DRIVEN 0 -FORK_ON_MESSAGE 0 -DEME_PROP_FULL 1 > run.log

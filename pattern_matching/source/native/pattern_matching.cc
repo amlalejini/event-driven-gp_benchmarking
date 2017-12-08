@@ -304,7 +304,6 @@ public:
       }
     }
 
-
     /// Advance deme by t timesteps. For each timestep, do a single advance of deme.
     void Advance(size_t t = 1) { for (size_t i = 0; i < t; ++i) SingleAdvance(); }
 
