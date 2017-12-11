@@ -573,7 +573,6 @@ public:
     inst_lib->AddInst("GetOpinion", Inst_GetOpinion, 1, "LocalReg[Arg1] = Trait[Opinion]");
     inst_lib->AddInst("SetOpinion", Inst_SetOpinion, 1, "Trait[Opinion] = LocalReg[Arg1]");
 
-
     // Are we forking on a message or not? All that changes are the message event handlers.
     if (FORK_ON_MESSAGE) {
       event_lib->AddEvent("MessageFacing", HandleEvent_MessageForking, "Event for messaging neighbors.");
