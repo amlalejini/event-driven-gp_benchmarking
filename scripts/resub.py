@@ -8,7 +8,13 @@ This script does the following:
 import argparse, os, copy, errno
 
 benchmarks = ["consensus", "pattern_matching"]
-treatments = ["Imperative_MsgForking", "Imperative_MsgNonForking", "EventDriven_MsgForking"]
+treatments = {"consensus": ["Imperative_MsgForking",
+                            "Imperative_MsgNonForking",
+                            "EventDriven_MsgForking"],
+              "pattern_matching": ["Imperative_MsgForking_PropSize1",
+                                   "Imperative_MsgNonForking_PropSize1",
+                                   "EventDriven_MsgForking_PropSize1"]
+              }
 default_final_update = 50000
 default_walltime = "04:00:00:00"
 default_feature = "intel16"
@@ -116,7 +122,7 @@ def main():
     #    - Get the most recent population snapshot for that job.
     #    - Get the final fitness save for the job.
     #    - Get the rep id (random number seed) for that job.
-    runs = [d for d in os.listdir(exp_dir) if d.split("-")[0] in treatments]
+    runs = [d for d in os.listdir(exp_dir) if d.split("-")[0] in treatments[benchmark]]
     run_info = {}
     for run in runs:
         run_id = run.split("__")[-1]
@@ -142,7 +148,7 @@ def main():
     # If -list, print out a list of experiment statuses.
     print "\nRun information: "
     if args.list:
-        treatment_cnts = {t:[0, 0] for t in treatments}
+        treatment_cnts = {t:[0, 0] for t in treatments[benchmark]}
         for run in run_info:
             info = run_info[run]
             treatment_cnts[info["treatment"]][1] += 1
