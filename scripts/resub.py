@@ -182,6 +182,7 @@ def main():
         mkdir_p(generated_qsub_loc)
         # For each unfinished job, generate a HPCC resubmission script.
         for run in run_info:
+            info = run_info[run]
             # If not finished, generate a qsub file for it.
             if (not info["finished"]):
                 qsub = copy.deepcopy(base_qsub)
