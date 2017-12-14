@@ -113,8 +113,8 @@ def main():
             fp.write("stitch@%d" % ext_start_update)
 
         # TODO Clean up resub directory.
-        # cmd = "rm -rf %s" % ext_run_dir
-        # return_code = subprocess.call(cmd, shell=True)
+        cmd = "rm -rf %s" % ext_run_dir
+        return_code = subprocess.call(cmd, shell=True)
 
 if __name__ == "__main__":
     main()
