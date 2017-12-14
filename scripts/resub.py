@@ -36,7 +36,26 @@ run_params = {"consensus": {
                     "FORK_ON_MESSAGE": 1
                 },
               },
-              "pattern_matching": {}
+              "pattern_matching": {
+                "Imperative_MsgForking_PropSize1": {
+                    "EVENT_DRIVEN": 0,
+                    "FORK_ON_MESSAGE": 1,
+                    "DEME_PROP_FULL": 0,
+                    "DEME_PROP_SIZE": 1
+                },
+                "Imperative_MsgNonForking_PropSize1": {
+                    "EVENT_DRIVEN": 0,
+                    "FORK_ON_MESSAGE": 0,
+                    "DEME_PROP_FULL": 0,
+                    "DEME_PROP_SIZE": 1
+                },
+                "EventDriven_MsgForking_PropSize1": {
+                    "EVENT_DRIVEN": 1,
+                    "FORK_ON_MESSAGE": 1,
+                    "DEME_PROP_FULL": 0,
+                    "DEME_PROP_SIZE": 1
+                },
+              }
              }
 
 # Variables to fill out:
