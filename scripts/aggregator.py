@@ -8,8 +8,6 @@ This script does the following:
 
 import argparse, os, copy, errno
 
-bencharks = ["consensus", "pattern_matching"]
-
 aggregator_dump = "./aggregated_data"
 
 def mkdir_p(path):
@@ -26,16 +24,13 @@ def mkdir_p(path):
 def main():
     parser = argparse.ArgumentParser(description="Data aggregation script.")
     parser.add_argument("data_directory", type=str, help="Target experiment directory.")
-    parser.add_argument("benchmark", type=str, help="What benchmark is this " + str(bencharks) + "?")
+    parser.add_argument("benchmark", type=str, help="What benchmark is this?")
     parser.add_argument("-ff", "--final_fitness", action="store_true", help="Aggregate final fitness data from fitness.csv file.")
     parser.add_argument("-fot", "--fitness_over_time", action="store_true", help="Aggregate fitness over time from fitness.csv file.")
     args = parser.parse_args()
 
     data_directory = args.data_directory
     benchmark = args.benchmark
-    if (not benchmark in bencharks):
-        print "Not a valid benchmark!"
-        exit(-1)
 
     # Get a list of all runs.
     runs = [d for d in os.listdir(data_directory) if "__" in d]
