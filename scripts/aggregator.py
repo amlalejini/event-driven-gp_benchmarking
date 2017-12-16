@@ -31,6 +31,7 @@ def main():
 
     data_directory = args.data_directory
     benchmark = args.benchmark
+    dump = os.path.join(aggregator_dump, benchmark)
 
     # Get a list of all runs.
     runs = [d for d in os.listdir(data_directory) if "__" in d]
@@ -38,7 +39,6 @@ def main():
 
     if (args.final_fitness):
         print "\nAggregating final fitness information..."
-        dump = os.path.join(aggregator_dump, benchmark)
         mkdir_p(dump)
         ff_content = "benchmark,treatment,run_id,final_update,mean_fitness,max_fitness\n"
         for run in runs:
@@ -64,7 +64,27 @@ def main():
 
     if (args.fitness_over_time):
         print "\nAggregating final fitness over time information..."
-        # TODO
+        # Some repeated work... but lazy. Shit's fast enough to get by.
+        mkdir_p(dump)
+        fot_content = "benchmark,treatment,run_id,update,mean_fitness,max_fitness\n"
+        for run in runs:
+            print "  run: " + str(run)
+            # benchmark, treatment, run_id, final_update, mean_fitness, max_fitness
+            run_id = run.split("__")[-1]
+            run_treat = "-".join(run.split("-")[:-1])
+            run_dir = os.path.join(data_directory, run)
+            with open(os.path.join(run_dir, "fitness.csv"), "r") as fp:
+                fitness_contents = fp.readlines()
+            header = fitness_contents[0].split(",")
+            header_lu = {header[i].strip():i for i in range(0, len(header))}
+            for line in fitness_contents[1:]:
+                line = map(lambda x : x.strip(), line.split(","))
+                update = line[header_lu["update"]]
+                mean_fit = line[header_lu["mean_fitness"]]
+                max_fit = line[header_lu["max_fitness"]]
+                fot_content += ",".join([benchmark, run_treat, run_id, update, mean_fit, max_fit]) + "\n"
+        with open(os.path.join(dump, "fitness_over_time.csv"), "w") as fp:
+            fp.write(fot_content)
 
 
 
