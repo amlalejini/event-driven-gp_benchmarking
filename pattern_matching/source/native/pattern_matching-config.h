@@ -43,7 +43,9 @@ EMP_BUILD_CONFIG( PatternMatchingConfig,
   GROUP(ANALYZE_MODE_GROUP, "Settings for analyzing consensus results."),
   VALUE(ANALYZE_MODE, bool, false, "Are we running in analyze mode?"),
   VALUE(ANALYSIS, size_t, 0, "Which analysis should we run?\n0: Analyze a single program, specified by ANALYZE_AGENT_FPATH."),
-  VALUE(ANALYZE_AGENT_FPATH, std::string, "ancestor.gp", "Path to single agent program to analzye.")
+  VALUE(ANALYZE_AGENT_FPATH, std::string, "ancestor.gp", "Path to single agent program to analzye."),
+  GROUP(PATTERN_GROUP, "Settings for selecting/modifying coordination pattern."),
+  VALUE(PATTERN_TYPE, size_t, 0, "What pattern are agents evolving to match?\n0: French Flag\n1: Membraned-4-Square (Goldsby et al., 2017 - F1D)")
 )
 
 #endif

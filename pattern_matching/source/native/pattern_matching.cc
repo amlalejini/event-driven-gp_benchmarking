@@ -395,6 +395,8 @@ protected:
   bool ANALYZE_MODE;
   size_t ANALYSIS;
   std::string ANALYZE_AGENT_FPATH;
+  // Pattern settings.
+  size_t PATTERN_TYPE;
 
   emp::Ptr<emp::Random> random;   ///< Random number generator. Exp class is responsible for allocation and deallocation.
   emp::Ptr<world_t> world;        ///< Empirical world object. Exp class is responsible for allocation and deallocation.
@@ -447,6 +449,7 @@ public:
     ANALYSIS = config.ANALYSIS();
     ANALYZE_AGENT_FPATH = config.ANALYZE_AGENT_FPATH();
     DEME_PROP_CLUMPY = config.DEME_PROP_CLUMPY();
+    PATTERN_TYPE = config.PATTERN_TYPE();
 
     // Do a little parameter cleaning:
     //  - Make sure propagule size is <= deme size.
@@ -485,6 +488,10 @@ public:
     for (size_t i = 0; i < affinity_table.size(); ++i) {
       affinity_table[i].SetByte(0, (uint8_t)i);
     }
+
+    // Generate target pattern.
+    // switch(ANALYSIS) {
+    //   case 0: {
 
     emp::vector<emp::vector<size_t>> templates = {{1,1,2,2,0,0},
                                                   {0,1,1,2,2,0},
@@ -1024,7 +1031,7 @@ public:
 
   static void Inst_GetRoleCnt(hardware_t & hw, const inst_t & inst) {
     state_t & state = hw.GetCurState();
-    state.SetLocal(inst.args[0], ROLE_NONE);
+    state.SetLocal(inst.args[0], VALID_ROLE_CNT);
   }
 
   /// Instruction: GetUID
