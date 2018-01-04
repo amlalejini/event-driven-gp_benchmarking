@@ -43,17 +43,18 @@ constexpr size_t MIN_UID = 1;             ///< Minimum bound on hardware UID. NO
 constexpr size_t MAX_UID = 1000000;       ///< Maximum bound on hardware UID.
 
 // Utility specifiers for different role values.
-constexpr size_t ROLE_NONE = 3;
+constexpr int    ROLE_NONE = -1;
 constexpr size_t ROLE_1 = 0;
 constexpr size_t ROLE_2 = 1;
 constexpr size_t ROLE_3 = 2;
-constexpr size_t VALID_ROLE_CNT = 3;
+constexpr size_t ROLE_4 = 3;
 
 constexpr size_t DEME_WIDTH = 6;  ///< For this experiment, deme size is locked in at 6x6.
 constexpr size_t DEME_HEIGHT = 6;
 
-constexpr size_t NUM_PATTERNS = 12; ///< Number of possible orientations of target coordination pattern (french flag).
-
+// Available development patterns.
+constexpr size_t PATTERN_ID__FRENCH_FLAG = 0;
+constexpr size_t PATTERN_ID__MEMBRANED_4_SQUARE = 1;
 
 
 /// Class to manage a pattern matching experiment.
@@ -408,12 +409,16 @@ protected:
 
   emp::vector<affinity_t> affinity_table; ///< Convenient table of affinities. (primarily used in debugging)
 
-  using row_t = emp::array<size_t, DEME_WIDTH>;
-  emp::array<emp::array<row_t, DEME_HEIGHT>, NUM_PATTERNS> patterns;
+  using row_t = emp::array<int, DEME_WIDTH>;
+  emp::vector<emp::array<row_t, DEME_HEIGHT>> patterns;
+
+  size_t VALID_ROLE_CNT;
+  size_t NUM_PATTERNS; ///< Number of possible orientations of target coordination pattern (french flag).
 
 public:
   PatternMatchingExp(const PatternMatchingConfig & config)
-    : affinity_table(emp::Pow2(AFFINITY_WIDTH))
+    : affinity_table(emp::Pow2(AFFINITY_WIDTH)),
+      VALID_ROLE_CNT(3), NUM_PATTERNS(12)
   {
     // Fill out experiment parameters with config settings!
     DEBUG_MODE = config.DEBUG_MODE();
@@ -489,48 +494,6 @@ public:
       affinity_table[i].SetByte(0, (uint8_t)i);
     }
 
-    // Generate target pattern.
-    // switch(ANALYSIS) {
-    //   case 0: {
-
-    emp::vector<emp::vector<size_t>> templates = {{1,1,2,2,0,0},
-                                                  {0,1,1,2,2,0},
-                                                  {0,0,1,1,2,2},
-                                                  {2,0,0,1,1,2},
-                                                  {2,2,0,0,1,1},
-                                                  {1,2,2,0,0,1}};
-    // For each possible pattern: fill out ROLE configuration.
-    // Fill out row patterns.
-    for (size_t pID = 0; pID < templates.size(); ++pID) {
-      for (size_t r = 0; r < DEME_HEIGHT; ++r) {
-        for (size_t c = 0; c < DEME_WIDTH; ++c) {
-          patterns[pID][r][c] = templates[pID][c];
-        }
-      }
-    }
-    // Fill out column patterns.
-    for (size_t pID = 0; pID < templates.size(); ++pID) {
-      for (size_t c = 0; c < DEME_WIDTH; ++c) {
-        for (size_t r = 0; r < DEME_HEIGHT; ++r) {
-          patterns[pID + templates.size()][r][c] = templates[pID][r];
-        }
-      }
-    }
-
-    // Print patterns.
-    for (size_t pID = 0; pID < patterns.size(); ++pID) {
-      // Print this pattern.
-      std::cout << "-- Pattern ID: " << pID << std::endl;
-      for (size_t r = 0; r < patterns[pID].size(); ++r) {
-        for (size_t c = 0; c < patterns[pID][r].size(); ++c) {
-          if (!c) std::cout << "\n";
-          else std::cout << " ";
-          std::cout << patterns[pID][r][c];
-        }
-      }
-      std::cout << std::endl;
-    }
-
     // - Setup the instruction set. -
     // Standard instructions:
     inst_lib->AddInst("Inc", hardware_t::Inst_Inc, 1, "Increment value in local memory Arg1");
@@ -570,11 +533,10 @@ public:
     inst_lib->AddInst("BroadcastMsg", Inst_BroadcastMsg, 0, "Broadcast output memory as message event.", emp::ScopeType::BASIC, 0, {"affinity"});
     // Role-related instructions:
     inst_lib->AddInst("GetRole", Inst_GetRole, 1, "Local[Arg1] = Trait[Role]");
-    inst_lib->AddInst("SetRole", Inst_SetRole, 1, "Trait[Role] = (Local[Arg1] mod 3)+1");
-    inst_lib->AddInst("SetRole1", Inst_SetRole1, 0, "Set role ID to 1.");
-    inst_lib->AddInst("SetRole2", Inst_SetRole2, 0, "Set role ID to 2.");
-    inst_lib->AddInst("SetRole3", Inst_SetRole3, 0, "Set role ID to 3.");
-    inst_lib->AddInst("GetRoleCnt", Inst_GetRoleCnt, 1, "Local[Arg1] = NUM ROLES");
+    inst_lib->AddInst("SetRole", [this](hardware_t & hw, const inst_t & inst) {
+      this->Inst_SetRole(hw, inst); }, 1, "Trait[Role] = (Local[Arg1] mod 3)+1");
+    inst_lib->AddInst("GetRoleCnt", [this](hardware_t & hw, const inst_t & inst) {
+      this->Inst_GetRoleCnt(hw, inst); }, 1, "Local[Arg1] = NUM ROLES");
     // Consensus-specific instructions:
     inst_lib->AddInst("GetUID", Inst_GetUID, 1, "LocalReg[Arg1] = Trait[UID]");
     inst_lib->AddInst("GetOpinion", Inst_GetOpinion, 1, "LocalReg[Arg1] = Trait[Opinion]");
@@ -624,7 +586,131 @@ public:
       }, 0, "Activate faced neighbor (if they're inactive; does nothing if they're already active).");
     }
 
-    // Configure the world.
+    // - Setup target development pattern. -
+    // Generate target pattern.
+    switch(PATTERN_TYPE) {
+      case PATTERN_ID__FRENCH_FLAG: {
+        // Configure pattern-specific settings.
+        inst_lib->AddInst("SetRole1", Inst_SetRole1, 0, "Set role ID to role 1.");
+        inst_lib->AddInst("SetRole2", Inst_SetRole2, 0, "Set role ID to role 2.");
+        inst_lib->AddInst("SetRole3", Inst_SetRole3, 0, "Set role ID to role 3.");
+        VALID_ROLE_CNT = 3;
+        NUM_PATTERNS = 12;
+        patterns.resize(NUM_PATTERNS);
+
+        // Generate French Flag patterns. (all possible alignments)
+        // NOTE: This pattern is generated differently than subsequent patterns because it
+        //       was the first one I implemented. Was not thinking ahead about extensibility of method.
+        emp::vector<emp::vector<int>> templates = {{1,1,2,2,0,0},
+                                                      {0,1,1,2,2,0},
+                                                      {0,0,1,1,2,2},
+                                                      {2,0,0,1,1,2},
+                                                      {2,2,0,0,1,1},
+                                                      {1,2,2,0,0,1}};
+        // For each possible pattern: fill out ROLE configuration.
+        // Fill out row patterns.
+        for (size_t pID = 0; pID < templates.size(); ++pID) {
+          for (size_t r = 0; r < DEME_HEIGHT; ++r) {
+            for (size_t c = 0; c < DEME_WIDTH; ++c) {
+              patterns[pID][r][c] = templates[pID][c];
+            }
+          }
+        }
+        // Fill out column patterns.
+        for (size_t pID = 0; pID < templates.size(); ++pID) {
+          for (size_t c = 0; c < DEME_WIDTH; ++c) {
+            for (size_t r = 0; r < DEME_HEIGHT; ++r) {
+              patterns[pID + templates.size()][r][c] = templates[pID][r];
+            }
+          }
+        }
+
+        break;
+      }
+      case PATTERN_ID__MEMBRANED_4_SQUARE: {
+        // Configure pattern-specific settings.
+        inst_lib->AddInst("SetRole1", Inst_SetRole1, 0, "Set role ID to role 1.");
+        inst_lib->AddInst("SetRole2", Inst_SetRole2, 0, "Set role ID to role 2.");
+        inst_lib->AddInst("SetRole3", Inst_SetRole3, 0, "Set role ID to role 3.");
+        inst_lib->AddInst("SetRole4", Inst_SetRole4, 0, "Set role ID to role 4.");
+        VALID_ROLE_CNT = 4;
+        NUM_PATTERNS = 144;
+        patterns.resize(NUM_PATTERNS);
+
+        using pattern_template_t = emp::vector<emp::vector<int>>;
+        // All rotations of pattern.
+        emp::vector<pattern_template_t> pattern_templates = {
+                                                             {{0,0,0,0,0,0},
+                                                              {2,1,1,2,2,3},
+                                                              {2,1,1,2,2,3},
+                                                              {2,3,3,0,0,3},
+                                                              {2,3,3,0,0,3},
+                                                              {1,1,1,1,1,1}},
+
+                                                             {{1,2,2,2,2,0},
+                                                              {1,3,3,1,1,0},
+                                                              {1,3,3,1,1,0},
+                                                              {1,0,0,2,2,0},
+                                                              {1,0,0,2,2,0},
+                                                              {1,3,3,3,3,0}},
+
+                                                             {{1,1,1,1,1,1},
+                                                              {3,0,0,3,3,2},
+                                                              {3,0,0,3,3,2},
+                                                              {3,2,2,1,1,2},
+                                                              {3,2,2,1,1,2},
+                                                              {0,0,0,0,0,0}},
+
+                                                             {{0,3,3,3,3,1},
+                                                              {0,2,2,0,0,1},
+                                                              {0,2,2,0,0,1},
+                                                              {0,1,1,3,3,1},
+                                                              {0,1,1,3,3,1},
+                                                              {0,2,2,2,2,1}}
+                                                            };
+
+        // For each possible pattern: fill out ROLE configuration.
+        // For all rotations...
+        for (size_t rotID = 0; rotID < pattern_templates.size(); ++rotID) {
+          size_t rot_offset = rotID * (DEME_WIDTH * DEME_HEIGHT);
+          size_t pattern_offset = 0;
+          // For all combinations of row/column positions as upper right-hand corner (all row/col offsets)...
+          for (size_t row_pos = 0; row_pos < pattern_templates[rotID].size(); ++row_pos) {
+            for (size_t col_pos = 0; col_pos < pattern_templates[rotID][row_pos].size(); ++col_pos) {
+              for (size_t r = 0; r < DEME_HEIGHT; ++r) {
+                for (size_t c = 0; c < DEME_WIDTH; ++c) {
+                  patterns[rot_offset + pattern_offset][r][c] = pattern_templates[rotID][(r + row_pos) % DEME_HEIGHT][(c + col_pos) % DEME_WIDTH];
+                  //patterns[rot_offset + pID][r][c] = pattern_templates[rotID][(r + offset) % DEME_HEIGHT][c];
+                }
+              }
+              pattern_offset += 1;
+            }
+          }
+        }
+        break;
+      }
+      default: {
+        std::cout << "Unrecognized pattern. (see PATTERN_TYPE parameter)" << std::endl;
+        exit(-1);
+        break;
+      }
+    }
+
+    // Print patterns.
+    for (size_t pID = 0; pID < patterns.size(); ++pID) {
+      // Print this pattern.
+      std::cout << "-- Pattern ID: " << pID << std::endl;
+      for (size_t r = 0; r < patterns[pID].size(); ++r) {
+        for (size_t c = 0; c < patterns[pID][r].size(); ++c) {
+          if (!c) std::cout << "\n";
+          else std::cout << " ";
+          std::cout << patterns[pID][r][c];
+        }
+      }
+      std::cout << "\n" << std::endl;
+    }
+
+    // - Configure the world. -
     world->SetWellMixed(true);                 // Deme germs are well-mixed. (no need for keeping track of deme-deme spatial information)
     world->SetFitFun([this](Agent & agent) { return this->CalcFitness(agent); });
     world->SetMutFun([this](Agent & agent, emp::Random & rnd) { return this->Mutate(agent, rnd); });
@@ -678,7 +764,7 @@ public:
       world->Inject(ancestor_prog, DEME_CNT);    // Inject a bunch of ancestor deme-germs into the population.
     }
 
-    emp::vector<size_t> pattern_scores(NUM_PATTERNS);
+    emp::vector<size_t> pattern_scores(patterns.size());
     size_t max_score = 0;
     for (size_t ud = 0; ud <= GENERATIONS; ++ud) {
       max_score = 0;
@@ -699,7 +785,7 @@ public:
         for (size_t i = 0; i < eval_deme->grid.size(); ++i) {
           const size_t x = eval_deme->GetLocX(i);
           const size_t y = eval_deme->GetLocY(i);
-          const size_t role = eval_deme->grid[i].GetTrait(TRAIT_ID__ROLE);
+          const int role = eval_deme->grid[i].GetTrait(TRAIT_ID__ROLE);
           for (size_t pID = 0; pID < patterns.size(); ++pID) {
             if (patterns[pID][y][x] == role) ++pattern_scores[pID];
             if (pattern_scores[pID] > agent.max_pattern_score) agent.max_pattern_score = pattern_scores[pID];
@@ -743,7 +829,7 @@ public:
         analyze_prog.PrintProgramFull();
         std::cout << " -------------------------" << std::endl;
 
-        emp::vector<size_t> pattern_scores(NUM_PATTERNS);
+        emp::vector<size_t> pattern_scores(patterns.size());
 
         eval_deme->SetProgram(analyze_prog);
         eval_deme->RandomizeUIDS();
@@ -770,7 +856,7 @@ public:
         for (size_t i = 0; i < eval_deme->grid.size(); ++i) {
           const size_t x = eval_deme->GetLocX(i);
           const size_t y = eval_deme->GetLocY(i);
-          const size_t role = eval_deme->grid[i].GetTrait(TRAIT_ID__ROLE);
+          const int role = eval_deme->grid[i].GetTrait(TRAIT_ID__ROLE);
           for (size_t pID = 0; pID < patterns.size(); ++pID) {
             if (patterns[pID][y][x] == role) ++pattern_scores[pID];
             if (pattern_scores[pID] > agent.max_pattern_score) agent.max_pattern_score = pattern_scores[pID];
@@ -1012,7 +1098,7 @@ public:
     state.SetLocal(inst.args[0], hw.GetTrait(TRAIT_ID__ROLE));
   }
 
-  static void Inst_SetRole(hardware_t & hw, const inst_t & inst) {
+  void Inst_SetRole(hardware_t & hw, const inst_t & inst) {
     state_t & state = hw.GetCurState();
     hw.SetTrait(TRAIT_ID__ROLE, emp::Mod((int)state.AccessLocal(inst.args[0]), VALID_ROLE_CNT));
   }
@@ -1029,7 +1115,11 @@ public:
     hw.SetTrait(TRAIT_ID__ROLE, ROLE_3);
   }
 
-  static void Inst_GetRoleCnt(hardware_t & hw, const inst_t & inst) {
+  static void Inst_SetRole4(hardware_t & hw, const inst_t & inst) {
+    hw.SetTrait(TRAIT_ID__ROLE, ROLE_4);
+  }
+
+  void Inst_GetRoleCnt(hardware_t & hw, const inst_t & inst) {
     state_t & state = hw.GetCurState();
     state.SetLocal(inst.args[0], VALID_ROLE_CNT);
   }
