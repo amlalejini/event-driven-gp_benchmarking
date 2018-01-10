@@ -28,7 +28,7 @@ Stretch: how do systems respond to perturbations (antagonistic and neutral)?
   - [x] Generate resub qsub files.
   - [x] Submit a directory of qsub files.
   - [x] Stitch together original submissions with resubmissions.
-  - [ ] Aggregate summary data.
+  - [x] Aggregate summary data.
   - [ ] R/Python analysis scripts.
 - [ ] Do a comment sweep.
 
@@ -133,40 +133,27 @@ Extend the consensus environment in terms of agent capabilities (eliminate agent
 #### References:
 D. Federici and K. Downing, “Evolution and Development of a Multicellular Organism: Scalability, Resilience, and Neutral Complexification,” Artif. Life, vol. 12, no. 3, pp. 381–409, 2006.
 
-### [~]Central-place Foraging Problem
+### Changing Environment
+Simple toy environment setup to demonstrate usefulness of event-driven computation.
 
-#### References
-C. M. Byers, B. H. C. Cheng, and P. K. McKinley, Digital enzymes: agents of reaction inside robotic controllers for the foraging problem. New York, New York, USA: ACM, 2011, pp. 243–250.
+### Treatments
+* Event-driven + Active sensing
+* Only event-driven
+* Only active sensing
 
-### [~]Robot Tag (predator-prey)
+### Logic Operations
+Simple logic environment where agents must compete to perform logical operations.
 
-See work done by Randy Olson.
+* Event-driven (w/environment)
+  - Request input signal from environment.
+    - Environment signals input.
+* Imperative (w/environment)
+  - Request input from environment directly.
+* Both options available.
 
-### [~]Lawnmower Problem
-This problem is described and used in both a modified and original form in Spector et al. 2011.
+Expectation: event-driven only worse than non-event driven. 
 
-##### Problem Description from (Spector et al., 2011) and (Koza, 1992)
-
-NOTE: will want to checkout original specification of problem.
-
-**Objective:** completely 'mow' a virtual lawn with a programmable virtual lawnmower.
-
-**Setup:** An NxN grid that contains lawn squares and obstacles (if obstacles are present). The world is toroidal.
-
-###### Agents capabilities:
-* Actuation: rotation, move forward
-* Sensing: obstacle/grass sensor
-* Instruction set (additions):
-  * rotate
-  * mow
-  * V8A
-  * frog -- one-argument operator that jumps the lawnmower ahead and sideways an amount indicated by its vector argument (while mowing the destination).
-  * progn -- two argument sequencing function
-
-#### References:
-L. Spector, B. Martin, K. Harrington, and T. Helmuth, Tag-based modules in genetic programming. New York, New York, USA: ACM, 2011, pp. 1419–1426.
-
-Koza, J. R. (1992). Genetic programming: on the programming of computers by means of natural selection (Vol. 1). MIT press.
+Like Logic-9 in Avida.
 
 ## Benchmarking Tests
 - Task success
