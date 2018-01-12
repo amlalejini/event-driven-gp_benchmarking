@@ -14,13 +14,45 @@
 #include "tools/Random.h"
 #include "tools/random_utils.h"
 #include "tools/math.h"
+#include "tools/string_utils.h"
 #include "hardware/EventDrivenGP.h"
 #include "Evo/World.h"
 #include "changing_environment-config.h"
 
+// TODO's:
+//  [ ] Edit configs.
+//  [ ] Commentize things.
+
 constexpr size_t AFFINITY_WIDTH = 16; ///< How many bits should affinities be?
 // Hardware trait indices.
 constexpr size_t TRAIT_ID__STATE = 0; ///< Agent state trait.
+
+emp::vector<std::string> env_affinity_strs = {"0000000000000000",
+                                              "1111000000001111",
+                                              "1111000011110000",
+                                              "0000000011111111",
+                                              "1111111100000000",
+                                              "0000111100001111",
+                                              "0000111111110000",
+                                              "1111111111111111",
+                                              "0110011001100110",
+                                              "1001011001101001",
+                                              "1001011010010110",
+                                              "0110011010011001",
+                                              "1001100101100110",
+                                              "0110100101101001",
+                                              "0110100110010110",
+                                              "1001100110011001",
+                                              "0011001100110011",
+                                              "1100001100111100",
+                                              "1100001111000011",
+                                              "0011001111001100",
+                                              "1100110000110011",
+                                              "0011110000111100",
+                                              "0011110011000011",
+                                              "1100110011001100"};
+
+size_t MAX_ENV_STATES = env_affinity_strs.size();
 
 /// Class to manage a changing environment Signal GP benchmark experiment.
 ///  - Will be configured based on given configs (i.e. treatment parameters).
@@ -72,6 +104,10 @@ protected:
   size_t EVAL_TIME;
   std::string ANCESTOR_FPATH; ///< File path to ancestor program description.
 
+  // Environment-specific settings.
+  size_t ENVIRONMENT_STATES;        ///< Number of environment states.
+  double ENVIRONMENT_CHG_PROB;      ///< Probability of environment change on update.
+
   // Hardware-specific settings.
   bool EVENT_DRIVEN;         ///< Do environment changes trigger events?
   bool ACTIVE_SENSING;       ///< Is active sensing enabled?
@@ -113,8 +149,12 @@ protected:
 
   emp::Ptr<hardware_t> eval_hw;
 
+  emp::vector<affinity_t> env_state_affs; ///< Affinities associated with each environment state.
+
+  int env_state;
+
 public:
-  ChangingEnvironmentExp(const ChangingEnvironmentConfig & config) {
+  ChangingEnvironmentExp(const ChangingEnvironmentConfig & config) : env_state(-1) {
     // Fill out experiment parameters with config settings.
     DEBUG_MODE = config.DEBUG_MODE();
     RANDOM_SEED = config.RANDOM_SEED();
@@ -122,6 +162,8 @@ public:
     POP_SIZE = config.POP_SIZE();
     EVAL_TIME = config.EVAL_TIME();
     ANCESTOR_FPATH = config.ANCESTOR_FPATH();
+    ENVIRONMENT_STATES = config.ENVIRONMENT_STATES();
+    ENVIRONMENT_CHG_PROB = config.ENVIRONMENT_CHG_PROB();
     EVENT_DRIVEN = config.EVENT_DRIVEN();
     ACTIVE_SENSING = config.ACTIVE_SENSING();
     HW_MAX_CORES = config.HW_MAX_CORES();
@@ -155,6 +197,24 @@ public:
 
     // Make our random number generator.
     random = emp::NewPtr<emp::Random>(RANDOM_SEED);
+
+    // Configure the environment.
+    if (ENVIRONMENT_STATES > MAX_ENV_STATES) {
+      std::cout << "Requested environment states exceeds maximum environment states." << std::endl;
+      std::cout << "Setting ENVIRONMENT_STATES to MAX_ENV_STATES" << std::endl;
+      ENVIRONMENT_STATES = MAX_ENV_STATES;
+    }
+    for (size_t i = 0; i < ENVIRONMENT_STATES; ++i) {
+      env_state_affs.emplace_back(affinity_t());
+      for (size_t c = 0; c < env_affinity_strs[i].size(); ++c) {
+        if (env_affinity_strs[i][c] == '0') env_state_affs[i].Set(c, 0);
+        else env_state_affs[i].Set(c, 1);
+      }
+    }
+    std::cout << "Environment states: " << std::endl;
+    for (size_t i = 0; i < env_state_affs.size(); ++i) {
+      std::cout << i << ": "; env_state_affs[i].Print(); std::cout << std::endl;
+    }
 
     // Make the world.
     world = emp::NewPtr<world_t>(random, "ChgEnv-World");
@@ -192,14 +252,40 @@ public:
     inst_lib->AddInst("Commit", hardware_t::Inst_Commit, 2, "Local memory Arg1 => Shared memory Arg2.");
     inst_lib->AddInst("Pull", hardware_t::Inst_Pull, 2, "Shared memory Arg1 => Shared memory Arg2.");
     inst_lib->AddInst("Nop", hardware_t::Inst_Nop, 0, "No operation.");
-
-    // TODO: custom instructions
-    // TODO: events
-    if (EVENT_DRIVEN) {
-
+    inst_lib->AddInst("Fork", Inst_Fork, 0, "Fork a new thread. Local memory contents of callee are loaded into forked thread's input memory.");
+    // Generate a SetState instruction for every possible environment state.
+    for (int i = 0; i < ENVIRONMENT_STATES; ++i) {
+      inst_lib->AddInst("SetState" + emp::to_string(i),
+        [i](hardware_t & hw, const inst_t & inst){
+          hw.SetTrait(TRAIT_ID__STATE, i);
+        }, 0, "Set internal state to " + emp::to_string(i));
     }
-    if (ACTIVE_SENSING) {
+    // Add events as appropriate.
+    if (EVENT_DRIVEN) {
+      event_lib->AddEvent("EnvSignal", HandleEvent__EnvSignal_ED, "");
+      event_lib->RegisterDispatchFun("EnvSignal", DispatchEvent__EnvSignal_ED);
+    } else {
+      event_lib->AddEvent("EnvSignal", HandleEvent__EnvSignal_IMP, "");
+      event_lib->RegisterDispatchFun("EnvSignal", DispatchEvent__EnvSignal_IMP);
+    }
 
+    if (ACTIVE_SENSING) {
+      // inst_lib->AddInst("SenseEnv", [this](hardware_t & hw, const inst_t & inst) {
+      //   this->Inst_SenseEnv(hw, inst);
+      // }, 1, "Sense environment state. Local[arg1]=EnvState");
+      for (int i = 0; i < ENVIRONMENT_STATES; ++i) {
+        inst_lib->AddInst("SenseState" + emp::to_string(i),
+          [this, i](hardware_t & hw, const inst_t & inst) {
+            state_t & state = hw.GetCurState();
+            state.SetLocal(inst.args[0], this->env_state==i);
+          }, 0, "Sense if current environment state is " + emp::to_string(i));
+      }
+    } else { // Make bloat instruction set.
+      for (int i = 0; i < ENVIRONMENT_STATES; ++i) {
+        inst_lib->AddInst("SenseStateNop" + emp::to_string(i),
+          [this, i](hardware_t & hw, const inst_t & inst) { return; }, 0,
+          "Sense if current environment state is " + emp::to_string(i));
+      }
     }
 
     // Configure the world.
@@ -209,17 +295,9 @@ public:
 
     // Configure evaluation hardware.
     eval_hw = emp::NewPtr<hardware_t>(inst_lib, event_lib, random);
-
-    // Configure ancestor.(todo)
-    // std::ifstream ancestor_fstream(ANCESTOR_FPATH);
-    // if (!ancestor_fstream.is_open()) {
-    //   std::cout << "Failed to open ancestor program file. Exiting..." << std::endl;
-    //   exit(-1);
-    // }
-    // ancestor.Load(ancestor_fstream);
-    // ancestor.SetMinBindThresh(HW_MIN_BIND_THRESH);
-    // ancestor.SetMaxCores(HW_MAX_CORES);
-    // ancestor.SetMaxCallDepth(HW_MAX_CALL_DEPTH);
+    eval_hw->SetMinBindThresh(HW_MIN_BIND_THRESH);
+    eval_hw->SetMaxCores(HW_MAX_CORES);
+    eval_hw->SetMaxCallDepth(HW_MAX_CALL_DEPTH);
 
     // Setup the data/systematics output file(s).
     auto & sys_file = world->SetupSystematicsFile(DATA_DIRECTORY + "systematics.csv");
@@ -271,13 +349,14 @@ public:
       std::cout << " -------------------------" << std::endl;
       world->Inject(ancestor_prog, POP_SIZE);    // Inject a bunch of ancestors into the population.
     }
-
     // Setup the evaluation hardware.
-
 
     // Population initialization done, ready to run evolution!
     double best_score = 0;
     size_t best_agent = 0;
+    emp::vector<size_t> possible_states;
+    size_t ei = 0;
+    for (size_t i = 0; i < ENVIRONMENT_STATES; ++i) possible_states.emplace_back(i);
     for (size_t ud = 0; ud <= GENERATIONS; ++ud) {
       // Evaluate each agent.
       best_score = 0;
@@ -285,15 +364,30 @@ public:
       for (size_t id = 0; id < world->GetSize(); ++id) {
         Agent & agent = world->GetOrg(id);
         agent.score = 0; // Reset agent's score to 0.
-        eval_hw->SetProgram(world->GetGenomeAt(id)); // Load agent's program into evaluation hardware.
+        env_state = -1;  // Reset the environment state.
+        ei = 0;
+        Shuffle(*random, possible_states);
+        LoadHWProgram(world->GetGenomeAt(id)); // Load agent's program into evaluation hardware.
         // Run the hardware for some amount of time.
-        for (size_t t = 0; t < EVAL_TIME; ++t) {
-          // Change environment?
-          // TODO
+        for (size_t t = 1; t < EVAL_TIME; ++t) {
+          //(EVAL_TIME % 8)==0){
+          if (env_state == -1 || random->P(ENVIRONMENT_CHG_PROB)) {
+            // Change the environment to a random state!
+            env_state = random->GetUInt(ENVIRONMENT_STATES);
+            // env_state = possible_states[ei];
+            // ei += 1;
+            // if (ei == ENVIRONMENT_STATES) {
+            //   ei = 0; Shuffle(*random, possible_states);
+            // }
+            // Trigger environment state event.
+            eval_hw->TriggerEvent("EnvSignal", env_state_affs[env_state]);
+          }
           // Run hardware for a time step.
           eval_hw->SingleProcess();
           // Does hardware state match environment state?
-          // TODO; if so, agent.score += 1
+          if (eval_hw->GetTrait(TRAIT_ID__STATE) == env_state) {
+            agent.score += 1;
+          }
         }
         // Compute some relevant information about performance.
         double fitness = CalcFitness(agent);
@@ -304,7 +398,6 @@ public:
       emp::EliteSelect(*world, 1, 1);
       // Run a tournament for the rest.
       emp::TournamentSelect(*world, 4, POP_SIZE - 1);
-
 
       // Print out in-run summary stats.
       std::cout << "Update " << world->GetUpdate();
@@ -321,11 +414,58 @@ public:
     }
   }
 
-
-  /// TODO:
   void RunAnalysis() {
-    std::cout << "Running analysis..." << std::endl;
-    //TODO!
+    std::cout << "\nRunning analysis...\n" << std::endl;
+    switch (ANALYSIS) {
+      case 0: { // Analyze a single program specified by ANALYZE AGENT
+        // Configure analysis program.
+        program_t analyze_prog(inst_lib);
+        std::ifstream analyze_fstream(ANALYZE_AGENT_FPATH);
+        if (!analyze_fstream.is_open()) {
+          std::cout << "Failed to open analysis program file(" << ANCESTOR_FPATH << "). Exiting..." << std::endl;
+          exit(-1);
+        }
+        analyze_prog.Load(analyze_fstream);
+        std::cout << " --- Analysis program: ---" << std::endl;
+        analyze_prog.PrintProgramFull();
+        std::cout << " -------------------------" << std::endl;
+
+        LoadHWProgram(analyze_prog);
+
+        // emp::vector<size_t> possible_states;
+        // for (size_t i = 0; i < ENVIRONMENT_STATES; ++i) possible_states.emplace_back(i);
+        // Shuffle(*random, possible_states);
+        // size_t ei = 0;
+        env_state = -1;  // Reset the environment state.
+        size_t match_score = 0;
+        // Evaluate hardware.
+        std::cout << "\n\nBEGIN AGENT EVALUATION" << std::endl;
+        eval_hw->PrintState();
+        for (size_t t = 1; t < EVAL_TIME; ++t) {
+          std::cout << "================= TIME: " << t << " =================" << std::endl;
+          if (env_state == -1 || random->P(ENVIRONMENT_CHG_PROB)) {
+            std::cout << "  ENV CHG: " << env_state << " --> ";
+            env_state = random->GetUInt(ENVIRONMENT_STATES);
+            std::cout << env_state << std::endl;
+            eval_hw->TriggerEvent("EnvSignal", env_state_affs[env_state]);
+          }
+          std::cout << "Environment state: " << env_state << std::endl;
+          // Run hardware for single timestep.
+          eval_hw->SingleProcess();
+          eval_hw->PrintState();
+          if (eval_hw->GetTrait(TRAIT_ID__STATE) == env_state) ++match_score;
+        }
+        std::cout << "\n\nAGENT EVALUATION SUMMARY" << std::endl;
+        Agent agent(analyze_prog);
+        agent.score = match_score;
+        double score = CalcFitness(agent);
+        std::cout << "  Final score: " << score << std::endl;
+        break;
+      }
+      default:
+        std::cout << "Unrecognized analysis." << std::endl;
+        break;
+    }
   }
 
   /// Run the experiment!
@@ -447,6 +587,40 @@ public:
       agent.program.PrintProgramFull(prog_ofstream);
       prog_ofstream.close();
     }
+  }
+
+  // Events.
+  static void HandleEvent__EnvSignal_ED(hardware_t & hw, const event_t & event) {
+    hw.SpawnCore(event.affinity, hw.GetMinBindThresh(), event.msg);
+  }
+
+  static void HandleEvent__EnvSignal_IMP(hardware_t & hw, const event_t & event) {
+    // Do nothing.
+    return;
+  }
+
+  static void DispatchEvent__EnvSignal_ED(hardware_t & hw, const event_t & event) {
+    hw.QueueEvent(event);
+  }
+
+  static void DispatchEvent__EnvSignal_IMP(hardware_t & hw, const event_t & event) {
+    // Do nothing.
+    return;
+  }
+
+  // Instructions
+  /// Instruction:
+  /// Description:
+  void Inst_SenseEnv(hardware_t & hw, const inst_t & inst) {
+    state_t & state = hw.GetCurState();
+    state.SetLocal(inst.args[0], env_state);
+  }
+
+  /// Instruction: Fork
+  /// Description: Fork thread with local memory as new thread's input buffer.
+  static void Inst_Fork(hardware_t & hw, const inst_t & inst) {
+    state_t & state = hw.GetCurState();
+    hw.SpawnCore(inst.affinity, hw.GetMinBindThresh(), state.local_mem);
   }
 
 };
