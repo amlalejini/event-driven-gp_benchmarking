@@ -20,13 +20,13 @@
 #include "changing_environment-config.h"
 
 // TODO's:
-//  [ ] Edit configs.
 //  [ ] Commentize things.
 
 constexpr size_t AFFINITY_WIDTH = 16; ///< How many bits should affinities be?
 // Hardware trait indices.
 constexpr size_t TRAIT_ID__STATE = 0; ///< Agent state trait.
 
+// Available environment affinity strings.
 emp::vector<std::string> env_affinity_strs = {"0000000000000000",
                                               "1111000000001111",
                                               "1111000011110000",
@@ -52,7 +52,7 @@ emp::vector<std::string> env_affinity_strs = {"0000000000000000",
                                               "0011110011000011",
                                               "1100110011001100"};
 
-size_t MAX_ENV_STATES = env_affinity_strs.size();
+size_t MAX_ENV_STATES = env_affinity_strs.size(); ///< Maximum possible number of environment states.
 
 /// Class to manage a changing environment Signal GP benchmark experiment.
 ///  - Will be configured based on given configs (i.e. treatment parameters).
@@ -69,7 +69,7 @@ public:
   using affinity_t = hardware_t::affinity_t;
 
   /// Struct to keep track of agents.
-  /// Agents are defined by a program
+  /// Agents are defined by a program and a score.
   struct Agent {
     program_t program;
     size_t score;
@@ -101,7 +101,7 @@ protected:
   int RANDOM_SEED;    ///< Random seed to use for this experiment.
   size_t GENERATIONS; ///< How generations should the experiment run for?
   size_t POP_SIZE;    ///< Population size.
-  size_t EVAL_TIME;
+  size_t EVAL_TIME;   ///< How long should we evaluate agents for?
   std::string ANCESTOR_FPATH; ///< File path to ancestor program description.
 
   // Environment-specific settings.
