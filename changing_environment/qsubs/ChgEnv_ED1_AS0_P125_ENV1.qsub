@@ -4,8 +4,8 @@
 #PBS -l walltime=02:00:00:00
 #PBS -l feature=intel16
 #PBS -l mem=8gb
-#PBS -t 101-200
-#PBS -N ChgEnv_ED1_AS1_P125_ENV2
+#PBS -t 1001-1100
+#PBS -N ChgEnv_ED1_AS0_P125_ENV1
 
 ### load necessary modules, e.g.
 module load powertools
@@ -16,10 +16,10 @@ RUN_DIR=/mnt/scratch/lalejini/data/signal-gp-benchmarking/${BENCHMARK}/${PBS_JOB
 
 # Experiment parameters
 PARAM__GENERATIONS=100000
-PARAM__ENVIRONMENT_STATES=2
+PARAM__ENVIRONMENT_STATES=1
 PARAM__ENVIRONMENT_CHG_PROB=0.125
 PARAM__EVENT_DRIVEN=1
-PARAM__ACTIVE_SENSING=1
+PARAM__ACTIVE_SENSING=0
 PARAM__HW_MAX_CORES=32
 PARAM__PROG_MAX_FUNC_CNT=32
 PARAM__PROG_MAX_FUNC_LEN=64
