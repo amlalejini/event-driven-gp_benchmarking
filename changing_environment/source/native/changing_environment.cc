@@ -353,7 +353,7 @@ public:
     double best_score = 0;
     size_t best_agent = 0;
     // emp::vector<size_t> possible_states;
-    size_t ei = 0;
+    // size_t ei = 0;
     // for (size_t i = 0; i < ENVIRONMENT_STATES; ++i) possible_states.emplace_back(i);
     for (size_t ud = 0; ud <= GENERATIONS; ++ud) {
       // Evaluate each agent.
@@ -363,7 +363,7 @@ public:
         Agent & agent = world->GetOrg(id);
         agent.score = 0; // Reset agent's score to 0.
         env_state = -1;  // Reset the environment state.
-        ei = 0;
+        // ei = 0;
         // Shuffle(*random, possible_states);
         LoadHWProgram(world->GetGenomeAt(id)); // Load agent's program into evaluation hardware.
         // Run the hardware for some amount of time.
@@ -402,7 +402,7 @@ public:
       world->DoMutations(1);
 
       // Population snapshot?
-      if (ud % POP_SNAPSHOT_INTERVAL == 0) Snapshot(ud);
+      if (ud % POP_SNAPSHOT_INTERVAL == 0) SnapshotSF(ud);
     }
   }
 
@@ -580,6 +580,23 @@ public:
       prog_ofstream.close();
     }
   }
+
+  /// This function takes a snapshot of the world.
+  /// Dump into single file (necessary instead of Snapshot to run on scratch drive on hpcc)
+  void SnapshotSF(size_t update) {
+    std::string snapshot_dir = DATA_DIRECTORY + "pop_" + emp::to_string((int)update);
+    std::string prog_filename;
+    mkdir(snapshot_dir.c_str(), ACCESSPERMS);
+    // For each program in the population, dump the full program description in a single file.
+    std::ofstream prog_ofstream(snapshot_dir + "/pop_" + emp::to_string((int)update) + ".pop");
+    for (size_t i = 0; i < world->GetSize(); ++i) {
+      if (i) prog_ofstream << "===\n";
+      Agent & agent = world->GetOrg(i);
+      agent.program.PrintProgramFull(prog_ofstream);
+    }
+    prog_ofstream.close();
+  }
+
 
   // Events.
   static void HandleEvent__EnvSignal_ED(hardware_t & hw, const event_t & event) {
