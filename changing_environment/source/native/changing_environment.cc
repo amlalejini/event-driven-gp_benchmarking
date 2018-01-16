@@ -19,38 +19,36 @@
 #include "Evo/World.h"
 #include "changing_environment-config.h"
 
-// TODO's:
-//  [ ] Commentize things.
-
 constexpr size_t AFFINITY_WIDTH = 16; ///< How many bits should affinities be?
 // Hardware trait indices.
 constexpr size_t TRAIT_ID__STATE = 0; ///< Agent state trait.
 
 // Available environment affinity strings.
 emp::vector<std::string> env_affinity_strs = {"0000000000000000",
+                                              "1111111111111111",
                                               "1111000000001111",
+                                              "0000111111110000",
                                               "1111000011110000",
+                                              "0000111100001111",
                                               "0000000011111111",
                                               "1111111100000000",
-                                              "0000111100001111",
-                                              "0000111111110000",
-                                              "1111111111111111",
                                               "0110011001100110",
+                                              "1001100110011001",
                                               "1001011001101001",
-                                              "1001011010010110",
+                                              "0110100110010110",
                                               "0110011010011001",
                                               "1001100101100110",
+                                              "1001011010010110",
                                               "0110100101101001",
-                                              "0110100110010110",
-                                              "1001100110011001",
                                               "0011001100110011",
+                                              "1100110011001100",
                                               "1100001100111100",
-                                              "1100001111000011",
-                                              "0011001111001100",
-                                              "1100110000110011",
-                                              "0011110000111100",
                                               "0011110011000011",
-                                              "1100110011001100"};
+                                              "1100001111000011",
+                                              "0011110000111100",
+                                              "0011001111001100",
+                                              "1100110000110011"
+                                              };
 
 size_t MAX_ENV_STATES = env_affinity_strs.size(); ///< Maximum possible number of environment states.
 
@@ -354,9 +352,9 @@ public:
     // Population initialization done, ready to run evolution!
     double best_score = 0;
     size_t best_agent = 0;
-    emp::vector<size_t> possible_states;
+    // emp::vector<size_t> possible_states;
     size_t ei = 0;
-    for (size_t i = 0; i < ENVIRONMENT_STATES; ++i) possible_states.emplace_back(i);
+    // for (size_t i = 0; i < ENVIRONMENT_STATES; ++i) possible_states.emplace_back(i);
     for (size_t ud = 0; ud <= GENERATIONS; ++ud) {
       // Evaluate each agent.
       best_score = 0;
@@ -366,19 +364,13 @@ public:
         agent.score = 0; // Reset agent's score to 0.
         env_state = -1;  // Reset the environment state.
         ei = 0;
-        Shuffle(*random, possible_states);
+        // Shuffle(*random, possible_states);
         LoadHWProgram(world->GetGenomeAt(id)); // Load agent's program into evaluation hardware.
         // Run the hardware for some amount of time.
         for (size_t t = 1; t < EVAL_TIME; ++t) {
-          //(EVAL_TIME % 8)==0){
           if (env_state == -1 || random->P(ENVIRONMENT_CHG_PROB)) {
             // Change the environment to a random state!
             env_state = random->GetUInt(ENVIRONMENT_STATES);
-            // env_state = possible_states[ei];
-            // ei += 1;
-            // if (ei == ENVIRONMENT_STATES) {
-            //   ei = 0; Shuffle(*random, possible_states);
-            // }
             // Trigger environment state event.
             eval_hw->TriggerEvent("EnvSignal", env_state_affs[env_state]);
           }
