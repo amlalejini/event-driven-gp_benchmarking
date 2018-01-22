@@ -28,12 +28,15 @@ def main():
             log = fp.read()
         fit_log = log.split("-------------------------")[-1]
         fit_log = fit_log.split("\n")
+        content = "update,mean_fitness,min_fitness,max_fitness,inferiority"
         for line in fit_log:
             line = line.split("  ")
             update = int(line[0].split(" ")[-1])
             score = int(line[-1].split(" ")[-1])
-            print update, score
-            exit()
+            if update % interval == 0:
+                content += ",".join([str(update), str(0), str(0), str(score), str(0)]) + "\n"
+        with open(os.path.join(run_dir, "recovered_fitness.csv"), "r") as fp:
+            fp.write(content)
 
 
 if __name__ == "__main__":
