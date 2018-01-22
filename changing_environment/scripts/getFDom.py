@@ -53,7 +53,11 @@ def main():
             arg_str = ["-%s %s" % (key, args[key]) for key in args]
             cmd = "./changing_environment " + " ".join(arg_str)
             print "Running: " + cmd
+
+            cp_cmd = "cp /mnt/home/lalejini/devo_ws/signal-gp-benchmarking/changing_environment/changing_environment %s" % run_dir
+            return_code = subprocess.call(cp_cmd, shell=True)
             return_code = subprocess.call(cmd, shell = True, cwd = run_dir)
+            break
 
 
 
