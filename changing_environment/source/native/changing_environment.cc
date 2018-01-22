@@ -138,6 +138,7 @@ protected:
   bool ANALYZE_MODE;
   size_t ANALYSIS;
   std::string ANALYZE_AGENT_FPATH;
+  size_t FDOM_ANALYSIS_TRIAL_CNT;
 
   emp::Ptr<emp::Random> random;
   emp::Ptr<world_t> world;
@@ -185,6 +186,7 @@ public:
     ANALYZE_MODE = config.ANALYZE_MODE();
     ANALYSIS = config.ANALYSIS();
     ANALYZE_AGENT_FPATH = config.ANALYZE_AGENT_FPATH();
+    FDOM_ANALYSIS_TRIAL_CNT = config.FDOM_ANALYSIS_TRIAL_CNT();
 
     // Setup the output directory.
     mkdir(DATA_DIRECTORY.c_str(), ACCESSPERMS);
@@ -424,10 +426,6 @@ public:
 
         LoadHWProgram(analyze_prog);
 
-        // emp::vector<size_t> possible_states;
-        // for (size_t i = 0; i < ENVIRONMENT_STATES; ++i) possible_states.emplace_back(i);
-        // Shuffle(*random, possible_states);
-        // size_t ei = 0;
         env_state = -1;  // Reset the environment state.
         size_t match_score = 0;
         // Evaluate hardware.
@@ -452,6 +450,53 @@ public:
         agent.score = match_score;
         double score = CalcFitness(agent);
         std::cout << "  Final score: " << score << std::endl;
+        break;
+      }
+      case 1: {
+        // Configure analysis program.
+        program_t analyze_prog(inst_lib);
+        std::ifstream analyze_fstream(ANALYZE_AGENT_FPATH);
+        if (!analyze_fstream.is_open()) {
+          std::cout << "Failed to open analysis program file(" << ANCESTOR_FPATH << "). Exiting..." << std::endl;
+          exit(-1);
+        }
+        analyze_prog.Load(analyze_fstream);
+        std::cout << " --- Analysis program: ---" << std::endl;
+        analyze_prog.PrintProgramFull();
+        std::cout << " -------------------------" << std::endl;
+
+        LoadHWProgram(analyze_prog);
+
+        env_state = -1;  // Reset the environment state.
+        emp::vector<size_t> match_scores; match_scores.resize(FDOM_ANALYSIS_TRIAL_CNT);
+        size_t match_score = 0;
+        for (size_t tID = 0; tID < FDOM_ANALYSIS_TRIAL_CNT; ++tID) {
+          match_score = 0;
+          // Evaluate hardware.
+          for (size_t t = 1; t < EVAL_TIME; ++t) {
+            if (env_state == -1 || random->P(ENVIRONMENT_CHG_PROB)) {
+              env_state = random->GetUInt(ENVIRONMENT_STATES);
+              eval_hw->TriggerEvent("EnvSignal", env_state_affs[env_state]);
+            }
+            // Run hardware for single timestep.
+            eval_hw->SingleProcess();
+            if (eval_hw->GetTrait(TRAIT_ID__STATE) == env_state) ++match_score;
+          }
+          Agent agent(analyze_prog);
+          agent.score = match_score;
+          match_scores[tID] = CalcFitness(agent);
+        }
+
+        // Output shit.
+        std::string scores_fname = "fdom.csv";
+        std::ofstream prog_ofstream("./"+scores_fname);
+        // Fill out the header.
+        prog_ofstream << "trial,fitness";
+        for (size_t tID = 0; tID < match_scores.size(); ++tID) {
+          prog_ofstream << "\n" << tID << "," << match_scores[tID];
+        }
+        prog_ofstream.close();
+
         break;
       }
       default:
@@ -570,7 +615,6 @@ public:
   /// Prints out the full programs of every agent in the population in a form that can be accurately reloaded.
   void Snapshot(size_t update) {
     std::string snapshot_dir = DATA_DIRECTORY + "pop_" + emp::to_string((int)update);
-    std::string prog_filename;
     mkdir(snapshot_dir.c_str(), ACCESSPERMS);
     // For each program in the population, dump the full program description.
     for (size_t i = 0; i < world->GetSize(); ++i) {
@@ -585,7 +629,6 @@ public:
   /// Dump into single file (necessary instead of Snapshot to run on scratch drive on hpcc)
   void SnapshotSF(size_t update) {
     std::string snapshot_dir = DATA_DIRECTORY + "pop_" + emp::to_string((int)update);
-    std::string prog_filename;
     mkdir(snapshot_dir.c_str(), ACCESSPERMS);
     // For each program in the population, dump the full program description in a single file.
     std::ofstream prog_ofstream(snapshot_dir + "/pop_" + emp::to_string((int)update) + ".pop");
