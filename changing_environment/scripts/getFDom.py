@@ -27,3 +27,6 @@ def main():
         with open("test.txt", "w") as fp:
             fp.write(fdom)
         exit()
+
+if __name__ == "__main__":
+    main()
