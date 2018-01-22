@@ -35,9 +35,9 @@ def main():
     if (args.run_fdom_analysis):
         for run in runs:
             run_dir = os.path.join(exp_dir, run)
-            run_info = run.split("_")
+            run_info = run..split("-")[0].split("_")
             ED = "0" if run_info[1] == "ED0" else "1"
-            AS = "0" if run_info[2] == "AS1" else "1"
+            AS = "0" if run_info[2] == "AS0" else "1"
             ENV = run_info[-1][2:]
             print run, ED, AS, ENV
 
