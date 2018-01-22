@@ -5,6 +5,7 @@ ChgEnv-specific script to extract final dominant program from pop files.
 
 import argparse, os, copy, errno
 
+default_final_update = 100000
 
 def main():
     parser = argparse.ArgumentParser(description="Experiment cleanup script.")
@@ -21,13 +22,13 @@ def main():
     runs = [d for d in os.listdir(exp_dir) if "ChgEnv" in d]
     for run in runs:
         run_dir = os.path.join(exp_dir, run)
-        with open("pop_%d/pop_%d.pop" % (final_update, final_update), "r") as fp:
+        with open(os.path.join(run_dir, "pop_%d/pop_%d.pop" % (final_update, final_update)), "r") as fp:
             final_pop = fp.read()
-        final_pop.split("===")
+        final_pop = final_pop.split("===")
         fdom = final_pop[0]
-        with open("test.txt", "w") as fp:
+        fdom_fpath = os.path.join(run_dir, "fdom.gp")
+        with open(fdom_fpath, "w") as fp:
             fp.write(fdom)
-        exit()
 
 if __name__ == "__main__":
     main()
