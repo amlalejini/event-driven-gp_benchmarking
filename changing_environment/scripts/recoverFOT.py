@@ -5,6 +5,7 @@ Script to recover fitness over time data. Fucked up and nuked fitness.csv and sy
 for changing environment runs. Still have populations, and can recover fitness data from run logs,
 so nothing necessary was truly lost. Just a pain in the ass.
 '''
+import argparse, os, copy, errno
 
 default_interval = 100
 default_final_update = 100000
