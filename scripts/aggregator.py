@@ -27,6 +27,7 @@ def main():
     parser.add_argument("benchmark", type=str, help="What benchmark is this?")
     parser.add_argument("-ff", "--final_fitness", action="store_true", help="Aggregate final fitness data from fitness.csv file.")
     parser.add_argument("-fot", "--fitness_over_time", action="store_true", help="Aggregate fitness over time from fitness.csv file.")
+    parser.add_argument("-mt_ff", "--multi_trial_final_fitness", action="store_true", help="Aggregate multi-trial final fitness data.")
     args = parser.parse_args()
 
     data_directory = args.data_directory
@@ -58,8 +59,36 @@ def main():
             mean_fitness = fu_content[header_lu["mean_fitness"]]
             max_fitness = fu_content[header_lu["max_fitness"]]
             ff_content += ",".join([benchmark, run_treat, run_id, final_update, mean_fitness, max_fitness]) + "\n"
-
         with open(os.path.join(dump, "final_fitness.csv"), "w") as fp:
+            fp.write(ff_content)
+
+    if (multi_trial_final_fitness):
+        print "\nAggregating multi-trial final fitness information..."
+        mkdir_p(dump)
+        ff_content = "benchmark,treatment,run_id,fitness\n"
+        for run in runs:
+            print "  run: " + str(run)
+            # benchmark, treatment, run_id, final_update, mean_fitness, max_fitness
+            run_id = run.split("__")[-1]
+            run_treat = "-".join(run.split("-")[:-1])
+            run_dir = os.path.join(data_directory, run)
+
+            with open(os.path.join(run_dir, "fdom.csv"), "r") as fp:
+                fitness_contents = fp.readlines()
+            header = fitness_contents[0].split(",")
+            header_lu = {header[i].strip():i for i in range(0, len(header))}
+            fitness_contents = fitness_contents[1:]
+            # Aggregate data.
+            trials = 0
+            fit_agg = 0
+            for line in fitness_contents:
+                line = line.split(",")
+                fitness = float(line[header_lu["fitness"]])
+                trials += 1
+                fit_agg += fitness
+            agg_fitness = fit_agg / float(trials)
+            ff_content += ",".join([benchmark, run_treat, run_id, agg_fitness]) + "\n"
+        with open(os.path.join(dump, "mt_final_fitness.csv"), "w") as fp:
             fp.write(ff_content)
 
     if (args.fitness_over_time):

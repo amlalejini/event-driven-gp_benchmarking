@@ -30,7 +30,6 @@ def main():
         fdom_fpath = os.path.join(run_dir, "fdom.gp")
         with open(fdom_fpath, "w") as fp:
             fp.write(fdom)
-        break
 
     if (args.run_fdom_analysis):
         for run in runs:
@@ -57,11 +56,6 @@ def main():
             cp_cmd = "cp /mnt/home/lalejini/devo_ws/signal-gp-benchmarking/changing_environment/changing_environment %s" % run_dir
             return_code = subprocess.call(cp_cmd, shell=True)
             return_code = subprocess.call(cmd, shell = True, cwd = run_dir)
-            break
-
-
-
-
 
 if __name__ == "__main__":
     main()
