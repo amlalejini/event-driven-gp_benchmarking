@@ -35,11 +35,28 @@ def main():
     if (args.run_fdom_analysis):
         for run in runs:
             run_dir = os.path.join(exp_dir, run)
-            run_info = run..split("-")[0].split("_")
+            run_info = run.split("-")[0].split("_")
             ED = "0" if run_info[1] == "ED0" else "1"
             AS = "0" if run_info[2] == "AS0" else "1"
-            ENV = run_info[-1][2:]
-            print run, ED, AS, ENV
+            ENV = run_info[-1][3:]
+            RND = run.split("__")[-1]
+            args = {"ENVIRONMENT_STATES": ENV,
+                    "EVENT_DRIVEN": ED,
+                    "ACTIVE_SENSING": AS,
+                    "RANDOM_SEED": RND,
+                    "ENVIRONMENT_CHG_PROB":"0.125",
+                    "HW_MAX_CORES":"32",
+                    "ANALYZE_MODE":"1",
+                    "ANALYSIS":"1",
+                    "ANALYZE_AGENT_FPATH":"fdom.gp",
+                    "FDOM_ANALYSIS_TRIAL_CNT":"100"}
+            arg_str = ["-%s %s" % (key, args[key]) for key in args]
+            cmd = "./changing_environment " + " ".join(arg_str)
+            print run
+            print cmd
+
+
+
 
 
 if __name__ == "__main__":
