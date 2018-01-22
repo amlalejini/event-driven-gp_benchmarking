@@ -3,7 +3,7 @@ ChgEnv-specific script to extract final dominant program from pop files.
 
 '''
 
-import argparse, os, copy, errno
+import argparse, os, copy, errno, subprocess
 
 default_final_update = 100000
 
@@ -52,8 +52,8 @@ def main():
                     "FDOM_ANALYSIS_TRIAL_CNT":"100"}
             arg_str = ["-%s %s" % (key, args[key]) for key in args]
             cmd = "./changing_environment " + " ".join(arg_str)
-            print run
-            print cmd
+            print "Running: " + cmd
+            return_code = subprocess.call(cmd, shell = True, cwd = run_dir)
 
 
 
