@@ -139,6 +139,8 @@ protected:
   size_t ANALYSIS;
   std::string ANALYZE_AGENT_FPATH;
   size_t FDOM_ANALYSIS_TRIAL_CNT;
+  bool TEASER_SENSORS;
+  bool TEASER_EVENTS;
 
   emp::Ptr<emp::Random> random;
   emp::Ptr<world_t> world;
@@ -151,6 +153,8 @@ protected:
   emp::vector<affinity_t> env_state_affs; ///< Affinities associated with each environment state.
 
   int env_state;
+
+  std::string analysis1_scores_fname;
 
 public:
   ChangingEnvironmentExp(const ChangingEnvironmentConfig & config) : env_state(-1) {
@@ -187,6 +191,8 @@ public:
     ANALYSIS = config.ANALYSIS();
     ANALYZE_AGENT_FPATH = config.ANALYZE_AGENT_FPATH();
     FDOM_ANALYSIS_TRIAL_CNT = config.FDOM_ANALYSIS_TRIAL_CNT();
+    TEASER_SENSORS = config.TEASER_SENSORS();
+    TEASER_EVENTS = config.TEASER_EVENTS();
 
     // Setup the output directory.
     mkdir(DATA_DIRECTORY.c_str(), ACCESSPERMS);
@@ -262,23 +268,35 @@ public:
     }
     // Add events as appropriate.
     if (EVENT_DRIVEN) {
-      event_lib->AddEvent("EnvSignal", HandleEvent__EnvSignal_ED, "");
-      event_lib->RegisterDispatchFun("EnvSignal", DispatchEvent__EnvSignal_ED);
+      if (ANALYZE_MODE && TEASER_EVENTS) {
+        // Use teaser events.
+        event_lib->AddEvent("EnvSignal", HandleEvent__EnvSignal_IMP, "");
+        event_lib->RegisterDispatchFun("EnvSignal", DispatchEvent__EnvSignal_IMP);
+      } else {
+        event_lib->AddEvent("EnvSignal", HandleEvent__EnvSignal_ED, "");
+        event_lib->RegisterDispatchFun("EnvSignal", DispatchEvent__EnvSignal_ED);
+      }
     } else {
       event_lib->AddEvent("EnvSignal", HandleEvent__EnvSignal_IMP, "");
       event_lib->RegisterDispatchFun("EnvSignal", DispatchEvent__EnvSignal_IMP);
     }
 
     if (ACTIVE_SENSING) {
-      // inst_lib->AddInst("SenseEnv", [this](hardware_t & hw, const inst_t & inst) {
-      //   this->Inst_SenseEnv(hw, inst);
-      // }, 1, "Sense environment state. Local[arg1]=EnvState");
-      for (int i = 0; i < ENVIRONMENT_STATES; ++i) {
-        inst_lib->AddInst("SenseState" + emp::to_string(i),
-          [this, i](hardware_t & hw, const inst_t & inst) {
-            state_t & state = hw.GetCurState();
-            state.SetLocal(inst.args[0], this->env_state==i);
-          }, 0, "Sense if current environment state is " + emp::to_string(i));
+      if (ANALYZE_MODE && TEASER_SENSORS) {
+        // Use teaser sensors.
+        for (int i = 0; i < ENVIRONMENT_STATES; ++i) {
+          inst_lib->AddInst("SenseState" + emp::to_string(i),
+            [this, i](hardware_t & hw, const inst_t & inst) { return; },
+            0, "Sense if current environment state is " + emp::to_string(i));
+        }
+      } else {
+        for (int i = 0; i < ENVIRONMENT_STATES; ++i) {
+          inst_lib->AddInst("SenseState" + emp::to_string(i),
+            [this, i](hardware_t & hw, const inst_t & inst) {
+              state_t & state = hw.GetCurState();
+              state.SetLocal(inst.args[0], this->env_state==i);
+            }, 0, "Sense if current environment state is " + emp::to_string(i));
+        }
       }
     } else { // Make bloat instruction set.
       for (int i = 0; i < ENVIRONMENT_STATES; ++i) {
@@ -300,11 +318,23 @@ public:
     eval_hw->SetMaxCallDepth(HW_MAX_CALL_DEPTH);
 
     // Setup the data/systematics output file(s).
-    auto & sys_file = world->SetupSystematicsFile(DATA_DIRECTORY + "systematics.csv");
-    sys_file.SetTimingRepeat(SYSTEMATICS_INTERVAL);
-    auto & fit_file = world->SetupFitnessFile(DATA_DIRECTORY + "fitness.csv");
-    fit_file.SetTimingRepeat(FITNESS_INTERVAL);
-    // world->SetupPopulationFile(DATA_DIRECTORY + "population.csv").SetTimingRepeat(POPULATION_INTERVAL);
+    if (!ANALYZE_MODE) {
+      auto & sys_file = world->SetupSystematicsFile(DATA_DIRECTORY + "systematics.csv");
+      sys_file.SetTimingRepeat(SYSTEMATICS_INTERVAL);
+      auto & fit_file = world->SetupFitnessFile(DATA_DIRECTORY + "fitness.csv");
+      fit_file.SetTimingRepeat(FITNESS_INTERVAL);
+    }
+
+    // Hacking this stuff in...
+    if (TEASER_SENSORS && !TEASER_EVENTS) {
+      analysis1_scores_fname = "teaser_sensors.csv";
+    } else if (TEASER_EVENTS && !TEASER_SENSORS) {
+      analysis1_scores_fname = "teaser_events.csv";
+    } else if (TEASER_EVENTS && TEASER_SENSORS) {
+      analysis1_scores_fname = "full_teaser.csv";
+    } else {
+      analysis1_scores_fname = "fdom.csv";
+    }
   }
 
   ~ChangingEnvironmentExp() {
@@ -488,8 +518,7 @@ public:
         }
 
         // Output shit.
-        std::string scores_fname = "fdom.csv";
-        std::ofstream prog_ofstream("./"+scores_fname);
+        std::ofstream prog_ofstream("./"+analysis1_scores_fname);
         // Fill out the header.
         prog_ofstream << "trial,fitness";
         for (size_t tID = 0; tID < match_scores.size(); ++tID) {

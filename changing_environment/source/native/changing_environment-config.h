@@ -42,7 +42,9 @@ EMP_BUILD_CONFIG( ChangingEnvironmentConfig,
   VALUE(ANALYZE_MODE, bool, false, "Are we running in analyze mode?"),
   VALUE(ANALYSIS, size_t, 0, "Which analysis should we run?\n0: Analyze a single program, specified by ANALYZE_AGENT_FPATH.\n1: FDOM analysis. Output fitness information over mulitple trials (fdom.csv)."),
   VALUE(FDOM_ANALYSIS_TRIAL_CNT, size_t, 10, "How many trials to do for FDOM analysis?"),
-  VALUE(ANALYZE_AGENT_FPATH, std::string, "ancestor.gp", "Path to single agent program to analzye.")
+  VALUE(ANALYZE_AGENT_FPATH, std::string, "ancestor.gp", "Path to single agent program to analzye."),
+  VALUE(TEASER_SENSORS, bool, false, "Are we using teasor sensors?"),
+  VALUE(TEASER_EVENTS, bool, false, "Are we using teasor events?")
 )
 
 #endif

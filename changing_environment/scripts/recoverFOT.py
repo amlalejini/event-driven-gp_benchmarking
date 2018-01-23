@@ -23,19 +23,20 @@ def main():
 
     runs = [d for d in os.listdir(exp_dir) if "ChgEnv" in d]
     for run in runs:
+        print "Recovering: " + run
         run_dir = os.path.join(exp_dir, run)
         with open(os.path.join(run_dir, "run.log"), "r") as fp:
             log = fp.read()
         fit_log = log.split("-------------------------")[-1]
         fit_log = fit_log.split("\n")
-        content = "update,mean_fitness,min_fitness,max_fitness,inferiority"
+        content = "update,mean_fitness,min_fitness,max_fitness,inferiority\n"
         for line in fit_log:
             line = line.split("  ")
             update = int(line[0].split(" ")[-1])
             score = int(line[-1].split(" ")[-1])
             if update % interval == 0:
                 content += ",".join([str(update), str(0), str(0), str(score), str(0)]) + "\n"
-        with open(os.path.join(run_dir, "recovered_fitness.csv"), "r") as fp:
+        with open(os.path.join(run_dir, "recovered_fitness.csv"), "w") as fp:
             fp.write(content)
 
 
