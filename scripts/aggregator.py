@@ -124,7 +124,7 @@ def main():
                 ts_contents = fp.readlines()
             header = ts_contents[0].split(",")
             header_lu = {header[i].strip():i for i in range(0, len(header))}
-            ts_contents = ts_contents[1:]    
+            ts_contents = ts_contents[1:]
             # Aggregate data.
             trials = 0
             fit_agg = 0
@@ -135,6 +135,23 @@ def main():
                 fit_agg += fitness
             agg_fitness = fit_agg / float(trials)
             ff_content += ",".join([benchmark, run_treat, "events", run_id, str(agg_fitness)]) + "\n"
+
+            with open(os.path.join(run_dir, "fdom.csv"), "r") as fp:
+                ts_contents = fp.readlines()
+            header = ts_contents[0].split(",")
+            header_lu = {header[i].strip():i for i in range(0, len(header))}
+            ts_contents = ts_contents[1:]
+            # Aggregate data.
+            trials = 0
+            fit_agg = 0
+            for line in ts_contents:
+                line = line.split(",")
+                fitness = float(line[header_lu["fitness"]])
+                trials += 1
+                fit_agg += fitness
+            agg_fitness = fit_agg / float(trials)
+            ff_content += ",".join([benchmark, run_treat, "none", run_id, str(agg_fitness)]) + "\n"
+
         with open(os.path.join(dump, "teaser_final_fitness.csv"), "w") as fp:
             fp.write(ff_content)
 
