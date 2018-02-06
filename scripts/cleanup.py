@@ -11,7 +11,7 @@ def main():
     parser.add_argument("directory", type=str, help="Target directory to clean up.")
     parser.add_argument("-u", "--update", type=int, help="Final update of experiment.")
     args = parser.parse_args()
-    
+
     final_update = args.update if args.update else default_final_update
     exp_dir = args.directory
     update = args.update
@@ -27,10 +27,10 @@ def main():
         for thing in things:
             if "pop_" in thing and thing != "pop_%d" % update:
                 cmd = "rm -rf %s" % os.path.join(run_dir, thing)
-                print "deleting: " + thing
+                return_code = subprocess.call(cmd, shell=True)
             if thing == "pattern_matching" or thing == "consensus" or thing == "changing_environment":
-                cmd = "rm %s" % thing
-                print "deleting: " + thing
+                cmd = "rm %s" % os.path.join(run_dir, thing)
+                return_code = subprocess.call(cmd, shell=True)
 
 
 
