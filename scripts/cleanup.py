@@ -10,7 +10,8 @@ def main():
     parser = argparse.ArgumentParser(description="Experiment cleanup script.")
     parser.add_argument("directory", type=str, help="Target directory to clean up.")
     parser.add_argument("-u", "--update", type=int, help="Final update of experiment.")
-
+    args = parser.parse_args()
+    
     final_update = args.update if args.update else default_final_update
     exp_dir = args.directory
     update = args.update
