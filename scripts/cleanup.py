@@ -3,7 +3,7 @@ cleanup.py
 This script cleans up unnecessary files from runs on HPCC.
 '''
 
-import argparse, os, copy, errno
+import argparse, os, copy, errno, subprocess
 
 
 def main():
