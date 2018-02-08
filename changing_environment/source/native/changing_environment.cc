@@ -515,6 +515,7 @@ public:
           Agent agent(analyze_prog);
           agent.score = match_score;
           match_scores[tID] = CalcFitness(agent);
+          ResetHW();
         }
 
         // Output shit.

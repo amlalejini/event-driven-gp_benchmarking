@@ -7,6 +7,7 @@
 #include <utility>
 #include <fstream>
 #include <sys/stat.h>
+#include <algorithm>
 
 #include "base/Ptr.h"
 #include "base/vector.h"
@@ -38,9 +39,14 @@ constexpr size_t TASK_ID__XOR = 7;
 constexpr size_t TASK_ID__EQU = 8;
 constexpr size_t TASK_ID__ECHO = 9;
 
+constexpr int MAX_TASK_INPUT = 32767;
+constexpr int MIN_TASK_INPUT = -32767;
+
 
 // Hardware trait indices.
 constexpr size_t TRAIT_ID__STATE = 0; ///< Agent internal state trait.
+
+// TODO: separate task completion from task credit (so I can calculate wasted task effort)
 
 // Available environment affinity strings.
 emp::vector<std::string> env_hc_tag_16_strs = {"0000000000000000",
@@ -90,21 +96,33 @@ public:
   /// Agents are defined by a program and a score.
   struct Agent {
     program_t program;
-    size_t score;
+    emp::vector<size_t> task_completions;
+    emp::vector<size_t> task_credits;
+    size_t env_state_matches;
+    emp::vector<double> trial_scores;
 
     Agent(const program_t & _p) :
       program(_p),
-      score(0)
+      task_completions(TASK_CNT),
+      task_credits(TASK_CNT),
+      env_state_matches(0),
+      trial_scores()
     { ; }
 
     Agent(Agent && in)
       : program(in.program),
-        score(in.score)
+        task_completions(in.task_completions),
+        task_credits(in.task_credits),
+        env_state_matches(in.env_state_matches),
+        trial_scores(in.trial_scores)
     { ; }
 
     Agent(const Agent & in)
       : program(in.program),
-        score(in.score)
+        task_completions(in.task_completions),
+        task_credits(in.task_credits),
+        env_state_matches(in.env_state_matches),
+        trial_scores(in.trial_scores)
     { ; }
 
     /// Required by Empirical's World.h.
@@ -116,12 +134,13 @@ public:
     int id;
     emp::vector<int> solutions;
     size_t completed;
+    size_t credited;
     std::function<void(int,int)> calc_solutions;
 
-    Task() : task(""), id(-1), solutions(), completed(0), calc_solutions() { ; }
+    Task() : task(""), id(-1), solutions(), completed(0), credited(0), calc_solutions() { ; }
 
     Task(std::string _name, int _id, emp::vector<int> _sol = emp::vector<int>())
-      : task(_name), id(_id), solutions(_sol), completed(0), calc_solutions()
+      : task(_name), id(_id), solutions(_sol), completed(0), credited(0), calc_solutions()
     { ; }
   };
 
@@ -308,7 +327,6 @@ public:
     // Initialize task input buffer. (for evaluation hardware)
     task_inputs.resize(TASK_INPUT_CNT);
     // Initialize tasks_info
-    // TODO: Check this shit.
     tasks_info.resize(TASK_CNT);
     // NAND Task
     Task & nand_task = tasks_info[TASK_ID__NAND];
@@ -395,18 +413,19 @@ public:
       this->tasks_info[TASK_ID__ECHO].solutions.emplace_back(b);
     };
 
-    const int a = 91416;
-    const int b = 465526;
-    for (size_t i = 0; i < tasks_info.size(); ++i) {
-      tasks_info[i].calc_solutions(a, b);
-      std::cout << "TASK: " << tasks_info[i].task << std::endl;
-      std::cout << "  Solutions:";
-      for (size_t k = 0; k < tasks_info[i].solutions.size(); ++k) {
-        std::cout << "  " << tasks_info[i].solutions[k];
-      } std::cout << std::endl;
-    }
+    // const int a = MAX_TASK_INPUT;
+    // const int b = MIN_TASK_INPUT;
+    // for (size_t i = 0; i < tasks_info.size(); ++i) {
+    //   tasks_info[i].calc_solutions(a, b);
+    //   std::cout << "TASK: " << tasks_info[i].task << std::endl;
+    //   std::cout << "  Solutions:";
+    //   for (size_t k = 0; k < tasks_info[i].solutions.size(); ++k) {
+    //     std::cout << "  " << tasks_info[i].solutions[k];
+    //   } std::cout << std::endl;
+    // }
+    //
+    // exit(-1);
 
-    exit(-1);
     // Make the world.
     world = emp::NewPtr<world_t>(random, "ChgEnv-World");
     world->Reset();
@@ -445,7 +464,6 @@ public:
     inst_lib->AddInst("Nop", hardware_t::Inst_Nop, 0, "No operation.");
     inst_lib->AddInst("Fork", Inst_Fork, 0, "Fork a new thread. Local memory contents of callee are loaded into forked thread's input memory.");
     inst_lib->AddInst("Nand", Inst_Nand, 3, "WM[ARG3]=~(WM[ARG1]&WM[ARG2])");
-    inst_lib->AddInst("Submit", [this](hardware_t & hw, const inst_t & inst) { this->Inst_Submit(hw, inst); }, 1, "Submit WM[ARG1] as potential task solution.");
     inst_lib->AddInst("Load-1", [this](hardware_t & hw, const inst_t & inst) {
       state_t & state = hw.GetCurState();
       state.SetLocal(inst.args[0], this->task_inputs[load_id]); // Load input.
@@ -459,6 +477,9 @@ public:
 
     // Configure changing environment instructions
     if (CHANGING_ENVIRONMENT) {
+      // Add conditional submit instruction.
+      inst_lib->AddInst("Submit", [this](hardware_t & hw, const inst_t & inst) { this->Inst_Submit__COND(hw, inst); }, 1, "Submit WM[ARG1] as potential task solution.");
+
       // Generate a SetState instruction for every possible environment state.
       for (int i = 0; i < ENVIRONMENT_STATES; ++i) {
         inst_lib->AddInst("SetState" + emp::to_string(i),
@@ -508,6 +529,9 @@ public:
             "Sense if current environment state is " + emp::to_string(i));
         }
       }
+    } else {
+      // Not changing environment
+      inst_lib->AddInst("Submit", [this](hardware_t & hw, const inst_t & inst) { this->Inst_Submit(hw, inst); }, 1, "Submit WM[ARG1] as potential task solution.");
     }
 
 
@@ -585,7 +609,7 @@ public:
       std::cout << " -------------------------" << std::endl;
       world->Inject(ancestor_prog, POP_SIZE);    // Inject a bunch of ancestors into the population.
     }
-
+    // TODO: add multiple trials in
     // Population initialization done, ready to run evolution!
     double best_score = 0;
     size_t best_agent = 0;
@@ -595,11 +619,12 @@ public:
       best_agent = 0;
       for (size_t id = 0; id < world->GetSize(); ++id) {
         Agent & agent = world->GetOrg(id);
-        agent.score = 0; // Reset agent's score to 0.
+        agent.env_state_matches = 0;
+        agent.task_completions.resize(TASK_CNT, 0);
+        agent.task_credits.resize(TASK_CNT, 0);
         env_state = -1;  // Reset the environment state.
-
+        ResetTasks();
         LoadHWProgram(world->GetGenomeAt(id)); // Load agent's program into evaluation hardware.
-
         // Run the hardware for some amount of time.
         for (size_t t = 1; t < EVAL_TIME; ++t) {
           if (CHANGING_ENVIRONMENT && (env_state == -1 || random->P(ENVIRONMENT_CHG_PROB))) {
@@ -611,9 +636,14 @@ public:
           // Run hardware for a time step.
           eval_hw->SingleProcess();
           // Does hardware state match environment state?
-          // if (CHANGING_ENVIRONMENT && eval_hw->GetTrait(TRAIT_ID__STATE) == env_state) {
-          //   agent.score += 1;
-          // }
+          if (eval_hw->GetTrait(TRAIT_ID__STATE) == env_state) {
+            agent.env_state_matches += 1;
+          }
+        }
+        // Update agent's task completion info.
+        for (size_t i = 0; i < tasks_info.size(); ++i) {
+          agent.task_completions[i] = tasks_info[i].completed;
+          agent.task_credits[i] = tasks_info[i].credited;
         }
         // Compute some relevant information about performance.
         double fitness = CalcFitness(agent);
@@ -643,7 +673,7 @@ public:
   void RunAnalysis() {
     std::cout << "\nRunning analysis...\n" << std::endl;
     switch (ANALYSIS) {
-      case 0: { // Analyze a single program specified by ANALYZE AGENT
+      case 0: {
         // Configure analysis program.
         program_t analyze_prog(inst_lib);
         std::ifstream analyze_fstream(ANALYZE_AGENT_FPATH);
@@ -655,79 +685,60 @@ public:
         std::cout << " --- Analysis program: ---" << std::endl;
         analyze_prog.PrintProgramFull();
         std::cout << " -------------------------" << std::endl;
-
-        LoadHWProgram(analyze_prog);
-
+        // Setup environment.
         env_state = -1;  // Reset the environment state.
-        size_t match_score = 0;
-        // Evaluate hardware.
+        ResetTasks();    // Reset logic tasks.
+
+        std::cout << "--- TASK SOLUTIONS --" << std::endl;
+        for (size_t i = 0; i < tasks_info.size(); ++i) {
+          std::cout << "TASK: " << tasks_info[i].task << std::endl;
+          std::cout << "  Solutions:";
+          for (size_t k = 0; k < tasks_info[i].solutions.size(); ++k) {
+            std::cout << "  " << tasks_info[i].solutions[k];
+          } std::cout << std::endl;
+        }
+        std::cout << " -------------------------" << std::endl;
+
+        // Load program to hardware.
+        LoadHWProgram(analyze_prog); // Load agent's program into evaluation hardware.
+        Agent agent(analyze_prog);
+        agent.env_state_matches = 0;
+        agent.task_completions.resize(TASK_CNT, 0);
+        agent.task_credits.resize(TASK_CNT, 0);
+        // Run the hardware for some amount of time.
         std::cout << "\n\nBEGIN AGENT EVALUATION" << std::endl;
         eval_hw->PrintState();
         for (size_t t = 1; t < EVAL_TIME; ++t) {
           std::cout << "================= TIME: " << t << " =================" << std::endl;
-          if (env_state == -1 || random->P(ENVIRONMENT_CHG_PROB)) {
+          if (CHANGING_ENVIRONMENT && (env_state == -1 || random->P(ENVIRONMENT_CHG_PROB))) {
             std::cout << "  ENV CHG: " << env_state << " --> ";
+            // Change the environment to a random state!
             env_state = random->GetUInt(ENVIRONMENT_STATES);
             std::cout << env_state << std::endl;
+            // Trigger environment state event.
             eval_hw->TriggerEvent("EnvSignal", env_state_tags[env_state]);
           }
           std::cout << "Environment state: " << env_state << std::endl;
-          // Run hardware for single timestep.
+          // Run hardware for a time step.
           eval_hw->SingleProcess();
           eval_hw->PrintState();
-          if (eval_hw->GetTrait(TRAIT_ID__STATE) == env_state) ++match_score;
+          // Does hardware state match environment state?
+          if (eval_hw->GetTrait(TRAIT_ID__STATE) == env_state) {
+            agent.env_state_matches += 1;
+          }
+        }
+        // Update agent's task completion info.
+        for (size_t i = 0; i < tasks_info.size(); ++i) {
+          agent.task_completions[i] = tasks_info[i].completed;
+          agent.task_credits[i] = tasks_info[i].credited;
         }
         std::cout << "\n\nAGENT EVALUATION SUMMARY" << std::endl;
-        Agent agent(analyze_prog);
-        agent.score = match_score;
-        double score = CalcFitness(agent);
-        std::cout << "  Final score: " << score << std::endl;
-        break;
-      }
-      case 1: {
-        // Configure analysis program.
-        program_t analyze_prog(inst_lib);
-        std::ifstream analyze_fstream(ANALYZE_AGENT_FPATH);
-        if (!analyze_fstream.is_open()) {
-          std::cout << "Failed to open analysis program file(" << ANCESTOR_FPATH << "). Exiting..." << std::endl;
-          exit(-1);
+        std::cout << "Env match score: " << agent.env_state_matches << std::endl;
+        std::cout << "-- Tasks summary --" << std::endl;
+        for (size_t i = 0; i < tasks_info.size(); ++i) {
+          std::cout << "  " << tasks_info[i].task << ": {COMP: " << tasks_info[i].completed << ", CRED: " << tasks_info[i].credited << "}" << std::endl;
         }
-        analyze_prog.Load(analyze_fstream);
-        std::cout << " --- Analysis program: ---" << std::endl;
-        analyze_prog.PrintProgramFull();
-        std::cout << " -------------------------" << std::endl;
-
-        LoadHWProgram(analyze_prog);
-
-        env_state = -1;  // Reset the environment state.
-        emp::vector<size_t> match_scores; match_scores.resize(FDOM_ANALYSIS_TRIAL_CNT);
-        size_t match_score = 0;
-        for (size_t tID = 0; tID < FDOM_ANALYSIS_TRIAL_CNT; ++tID) {
-          match_score = 0;
-          // Evaluate hardware.
-          for (size_t t = 1; t < EVAL_TIME; ++t) {
-            if (env_state == -1 || random->P(ENVIRONMENT_CHG_PROB)) {
-              env_state = random->GetUInt(ENVIRONMENT_STATES);
-              eval_hw->TriggerEvent("EnvSignal", env_state_tags[env_state]);
-            }
-            // Run hardware for single timestep.
-            eval_hw->SingleProcess();
-            if (eval_hw->GetTrait(TRAIT_ID__STATE) == env_state) ++match_score;
-          }
-          Agent agent(analyze_prog);
-          agent.score = match_score;
-          match_scores[tID] = CalcFitness(agent);
-        }
-
-        // Output shit.
-        std::ofstream prog_ofstream("./"+analysis_scores_fname);
-        // Fill out the header.
-        prog_ofstream << "trial,fitness";
-        for (size_t tID = 0; tID < match_scores.size(); ++tID) {
-          prog_ofstream << "\n" << tID << "," << match_scores[tID];
-        }
-        prog_ofstream.close();
-
+        // Print some info.
         break;
       }
       default:
@@ -754,6 +765,20 @@ public:
     ResetHW();
     eval_hw->SetProgram(program);
     eval_hw->SpawnCore(0, memory_t(), true);
+  }
+
+  void ResetTasks() {
+    const int a = random->GetInt(MIN_TASK_INPUT, MAX_TASK_INPUT);
+    const int b = random->GetInt(MIN_TASK_INPUT, MAX_TASK_INPUT);
+    for (size_t i = 0; i < tasks_info.size(); ++i) {
+      Task & task = tasks_info[i];
+      task.completed = 0;
+      task.credited = 0;
+      task.calc_solutions(a, b);
+    }
+    load_id = 0;
+    task_inputs[0] = a;
+    task_inputs[1] = b;
   }
 
   /// Mutate organism function.
@@ -839,7 +864,24 @@ public:
 
   /// Fitness function.
   double CalcFitness(Agent & agent) {
-    return agent.score;
+    if (!agent.trial_scores.size()) return 0.0;
+    double val = agent.trial_scores[0];
+    for (size_t i = 0; i < agent.trial_scores.size(); ++i) {
+      if (agent.trial_scores[i] < val) val = agent.trial_scores[i];
+    }
+    return val;
+  }
+
+  double Score__ChgEnvProb(Agent & agent) {
+    return 0.0;
+  }
+
+  double Score__TasksProb(Agent & agent) {
+    return 0.0
+  }
+
+  double Score__ChgEnvWithTasksProg(Agent & agent) {
+    return 0.0
   }
 
   /// This function takes a snapshot of the world.
@@ -899,8 +941,41 @@ public:
     state.SetLocal(inst.args[0], env_state);
   }
 
+  /// Instruction: Submit
+  /// Description: Submit WM[ARG1] as solution to a task.
+  ///  - Check WM[ARG1] against all possible solutions on all tasks.
+  ///  - Give credit where credit is due.
   void Inst_Submit(hardware_t & hw, const inst_t & inst) {
+    state_t & state = hw.GetCurState();
+    const int sol = (int)state.GetLocal(inst.args[0]);
+    for (size_t i = 0; i < tasks_info.size(); ++i) {
+      Task & task = tasks_info[i];
+      for (size_t s = 0; s < task.solutions.size(); ++s) {
+        if (task.solutions[s] == sol) {
+          task.completed += 1;
+          task.credited += 1;
+        }
+      }
+    }
+  }
 
+  /// Instruction: Submit
+  /// Description: Submit WM[ARG1] as solution to a task. Only give credit if
+  ///   internal state matches environment state.
+  ///  - Check WM[ARG1] against all possible solutions on all tasks.
+  ///  - Give credit where credit is due if internal state == env state.
+  void Inst_Submit__COND(hardware_t & hw, const inst_t & inst) {
+    state_t & state = hw.GetCurState();
+    const int sol = (int)state.GetLocal(inst.args[0]);
+    for (size_t i = 0; i < tasks_info.size(); ++i) {
+      Task & task = tasks_info[i];
+      for (size_t s = 0; s < task.solutions.size(); ++s) {
+        if (task.solutions[s] == sol) {
+          task.completed += 1;
+          if (hw.GetTrait(TRAIT_ID__STATE) == env_state) task.credited += 1;
+        }
+      }
+    }
   }
 
   /// Instruction: Fork
