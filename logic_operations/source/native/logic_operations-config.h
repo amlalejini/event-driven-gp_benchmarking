@@ -3,7 +3,7 @@
 
 #include "config/config.h"
 // TODO: Update configs (both what's in here and the descriptions)!
-EMP_BUILD_CONFIG( ChangingEnvironmentConfig,
+EMP_BUILD_CONFIG( LogicOperationsConfig,
   GROUP(DEFAULT_GROUP, "General Settings"),
   VALUE(DEBUG_MODE, bool, false, "Should we output debug information?"),
   VALUE(RANDOM_SEED, int, -1, "Random number seed (negative value for based on time)"),
@@ -11,10 +11,10 @@ EMP_BUILD_CONFIG( ChangingEnvironmentConfig,
   VALUE(GENERATIONS, size_t, 100, "How many generations should we run evolution?"),
   VALUE(EVAL_TIME, size_t, 256, "Agent evaluation time."),
   VALUE(TRIAL_CNT, size_t, 1, "Number of trials to evaluate agents when determining fitness."),
+  VALUE(FITNESS_CALC_TYPE, size_t, 0, "Fitness calculation type. 0: Min of trials, 1: Avg of trials."),
   VALUE(ANCESTOR_FPATH, std::string, "ancestor.gp", "Ancestor program file."),
   VALUE(PROBLEM, size_t, 0, "Which problem are we running?\n0: ..."),
   GROUP(ENVIRONMENT_GROUP, "Environment settings."),
-  VALUE(CHANGING_ENVIRONMENT, bool, false, "Is the environment changing?"),
   VALUE(ENVIRONMENT_STATES, size_t, 8, "Total possible number of environment states."),
   VALUE(RND_ENV_STATE_TAGS, bool, false, "Should we randomly generate environment state tags?"),
   VALUE(ENVIRONMENT_CHG_PROB, double, 0.125, "Probability the environment changes every update during evaluation."),

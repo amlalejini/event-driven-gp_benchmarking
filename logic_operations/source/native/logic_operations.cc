@@ -8,6 +8,7 @@
 #include <fstream>
 #include <sys/stat.h>
 #include <algorithm>
+#include <functional>
 
 #include "base/Ptr.h"
 #include "base/vector.h"
@@ -42,11 +43,15 @@ constexpr size_t TASK_ID__ECHO = 9;
 constexpr int MAX_TASK_INPUT = 32767;
 constexpr int MIN_TASK_INPUT = -32767;
 
+constexpr size_t PROBLEM_ID__TASKS = 0;
+constexpr size_t PROBLEM_ID__CHANGING_ENV = 1;
+constexpr size_t PROBLEM_ID__CHANGING_ENV_WITH_TASKS = 2;
+
+constexpr size_t FIT_TYPE__MIN = 0;
+constexpr size_t FIT_TYPE__AVG = 1;
 
 // Hardware trait indices.
 constexpr size_t TRAIT_ID__STATE = 0; ///< Agent internal state trait.
-
-// TODO: separate task completion from task credit (so I can calculate wasted task effort)
 
 // Available environment affinity strings.
 emp::vector<std::string> env_hc_tag_16_strs = {"0000000000000000",
@@ -80,7 +85,7 @@ size_t MAX_ENV_HC_STATES = env_hc_tag_16_strs.size(); ///< Maximum possible numb
 
 /// Class to manage a changing environment Signal GP benchmark experiment.
 ///  - Will be configured based on given configs (i.e. treatment parameters).
-class ChangingEnvironmentExp {
+class LogicOperationsExp {
 public:
   using hardware_t = emp::EventDrivenGP_AW<TAG_WIDTH_16>;
   using program_t = hardware_t::Program;
@@ -96,33 +101,33 @@ public:
   /// Agents are defined by a program and a score.
   struct Agent {
     program_t program;
-    emp::vector<size_t> task_completions;
-    emp::vector<size_t> task_credits;
-    size_t env_state_matches;
-    emp::vector<double> trial_scores;
+    emp::vector<emp::vector<size_t>> task_completions_by_trial;
+    emp::vector<emp::vector<size_t>> task_credits_by_trial;
+    emp::vector<size_t> env_matches_by_trial;
+    emp::vector<double> scores_by_trial;
 
     Agent(const program_t & _p) :
       program(_p),
-      task_completions(TASK_CNT),
-      task_credits(TASK_CNT),
-      env_state_matches(0),
-      trial_scores()
+      task_completions_by_trial(),
+      task_credits_by_trial(),
+      env_matches_by_trial(),
+      scores_by_trial()
     { ; }
 
     Agent(Agent && in)
       : program(in.program),
-        task_completions(in.task_completions),
-        task_credits(in.task_credits),
-        env_state_matches(in.env_state_matches),
-        trial_scores(in.trial_scores)
+        task_completions_by_trial(in.task_completions_by_trial),
+        task_credits_by_trial(in.task_credits_by_trial),
+        env_matches_by_trial(in.env_matches_by_trial),
+        scores_by_trial(in.scores_by_trial)
     { ; }
 
     Agent(const Agent & in)
       : program(in.program),
-        task_completions(in.task_completions),
-        task_credits(in.task_credits),
-        env_state_matches(in.env_state_matches),
-        trial_scores(in.trial_scores)
+        task_completions_by_trial(in.task_completions_by_trial),
+        task_credits_by_trial(in.task_credits_by_trial),
+        env_matches_by_trial(in.env_matches_by_trial),
+        scores_by_trial(in.scores_by_trial)
     { ; }
 
     /// Required by Empirical's World.h.
@@ -135,12 +140,14 @@ public:
     emp::vector<int> solutions;
     size_t completed;
     size_t credited;
+    emp::vector<size_t> comp_time_stamps;              // Time stamp for each time it was completed.
+    emp::vector<size_t> cred_time_stamps;
     std::function<void(int,int)> calc_solutions;
 
-    Task() : task(""), id(-1), solutions(), completed(0), credited(0), calc_solutions() { ; }
+    Task() : task(""), id(-1), solutions(), completed(0), credited(0), comp_time_stamps(), cred_time_stamps(), calc_solutions() { ; }
 
     Task(std::string _name, int _id, emp::vector<int> _sol = emp::vector<int>())
-      : task(_name), id(_id), solutions(_sol), completed(0), credited(0), calc_solutions()
+      : task(_name), id(_id), solutions(_sol), completed(0), credited(0), comp_time_stamps(), cred_time_stamps(), calc_solutions()
     { ; }
   };
 
@@ -155,6 +162,8 @@ protected:
   size_t EVAL_TIME;           ///< How long should we evaluate agents for?
   size_t TRIAL_CNT;           ///< How many trials should we evaluate each agent?
   std::string ANCESTOR_FPATH; ///< File path to ancestor program description.
+  size_t PROBLEM;
+  size_t FITNESS_CALC_TYPE;
 
   // Environment-specific settings.
   bool CHANGING_ENVIRONMENT;        ///< Is the environment changing?
@@ -163,7 +172,7 @@ protected:
   bool RND_ENV_STATE_TAGS;
 
   // Hardware-specific settings.
-  bool ENV_SIGNALS;         ///< Do environment changes trigger events?
+  bool ENV_SIGNALS;          ///< Do environment changes trigger events?
   bool ACTIVE_SENSING;       ///< Is active sensing enabled?
   size_t HW_MAX_CORES;       ///< Max number of hardware cores. i.e. max number of simultaneous threads of execution hardware will support.
   size_t HW_MAX_CALL_DEPTH;  ///< Max call depth of hardware unit.
@@ -216,11 +225,14 @@ protected:
   size_t load_id;
 
   int env_state;
+  int eval_update;
 
   std::string analysis_scores_fname;
 
+  std::function<double(Agent &, size_t)> score_agent;
+
 public:
-  ChangingEnvironmentExp(const ChangingEnvironmentConfig & config) : load_id(0), env_state(-1) {
+  LogicOperationsExp(const LogicOperationsConfig & config) : load_id(0), env_state(-1), eval_update(0) {
     // Fill out experiment parameters with config settings.
     DEBUG_MODE = config.DEBUG_MODE();
     RANDOM_SEED = config.RANDOM_SEED();
@@ -228,8 +240,9 @@ public:
     POP_SIZE = config.POP_SIZE();
     EVAL_TIME = config.EVAL_TIME();
     TRIAL_CNT = config.TRIAL_CNT();
+    FITNESS_CALC_TYPE = config.FITNESS_CALC_TYPE();
     ANCESTOR_FPATH = config.ANCESTOR_FPATH();
-    CHANGING_ENVIRONMENT = config.CHANGING_ENVIRONMENT();
+    PROBLEM = config.PROBLEM();
     ENVIRONMENT_STATES = config.ENVIRONMENT_STATES();
     ENVIRONMENT_CHG_PROB = config.ENVIRONMENT_CHG_PROB();
     RND_ENV_STATE_TAGS = config.RND_ENV_STATE_TAGS();
@@ -272,57 +285,87 @@ public:
     // Make our random number generator.
     random = emp::NewPtr<emp::Random>(RANDOM_SEED);
 
-    // TODO: on analysis, load env tags.
-    // Configure the environment.
-    if (RND_ENV_STATE_TAGS) {
-      // Generate random (but unique) tags.
-      std::unordered_set<int> uset;
-      if (ENVIRONMENT_STATES > emp::Pow2(TAG_WIDTH_16)) {
-        std::cout << "Requested environment states exceeds maximum environment states." << std::endl;
-        std::cout << "Setting ENVIRONMENT_STATES to 2^TAG_WIDTH" << std::endl;
-        ENVIRONMENT_STATES = emp::Pow2(TAG_WIDTH_16);
-      }
-      std::cout << "Randomly generating env tags: " << std::endl;
-      for (size_t i = 0; i < ENVIRONMENT_STATES; ++i) {
-        env_state_tags.emplace_back(tag_t());
-        env_state_tags[i].Randomize(*random);
-        int tag_int = env_state_tags[i].GetUInt(0);
-        while (true) {
-          if (!emp::Has(uset, tag_int)) {
-            uset.emplace(tag_int);
-            break;
-          } else {
-            env_state_tags[i].Randomize(*random);
-            tag_int = env_state_tags[i].GetUInt(0);
+    if (!ANALYZE_MODE) {
+      // Configure the environment.
+      if (RND_ENV_STATE_TAGS) {
+        // Generate random (but unique) tags.
+        std::unordered_set<int> uset;
+        if (ENVIRONMENT_STATES > emp::Pow2(TAG_WIDTH_16)) {
+          std::cout << "Requested environment states exceeds maximum environment states." << std::endl;
+          std::cout << "Setting ENVIRONMENT_STATES to 2^TAG_WIDTH" << std::endl;
+          ENVIRONMENT_STATES = emp::Pow2(TAG_WIDTH_16);
+        }
+        std::cout << "Randomly generating env tags: " << std::endl;
+        for (size_t i = 0; i < ENVIRONMENT_STATES; ++i) {
+          env_state_tags.emplace_back(tag_t());
+          env_state_tags[i].Randomize(*random);
+          int tag_int = env_state_tags[i].GetUInt(0);
+          while (true) {
+            if (!emp::Has(uset, tag_int)) {
+              uset.emplace(tag_int);
+              break;
+            } else {
+              env_state_tags[i].Randomize(*random);
+              tag_int = env_state_tags[i].GetUInt(0);
+            }
+          }
+        }
+      } else {
+        // Assign hand-coded tags to the environment.
+        if (ENVIRONMENT_STATES > MAX_ENV_HC_STATES) {
+          std::cout << "Requested environment states exceeds maximum environment states." << std::endl;
+          std::cout << "Setting ENVIRONMENT_STATES to MAX_ENV_HC_STATES" << std::endl;
+          ENVIRONMENT_STATES = MAX_ENV_HC_STATES;
+        }
+        for (size_t i = 0; i < ENVIRONMENT_STATES; ++i) {
+          env_state_tags.emplace_back(tag_t());
+          for (size_t c = 0; c < env_hc_tag_16_strs[i].size(); ++c) {
+            if (env_hc_tag_16_strs[i][c] == '0') env_state_tags[i].Set(c, 0);
+            else env_state_tags[i].Set(c, 1);
           }
         }
       }
-    } else {
-      // Assign hand-coded tags to the environment.
-      if (ENVIRONMENT_STATES > MAX_ENV_HC_STATES) {
-        std::cout << "Requested environment states exceeds maximum environment states." << std::endl;
-        std::cout << "Setting ENVIRONMENT_STATES to MAX_ENV_HC_STATES" << std::endl;
-        ENVIRONMENT_STATES = MAX_ENV_HC_STATES;
+      // Save out the environment states.
+      std::ofstream envtags_ofstream(DATA_DIRECTORY + "env_tags.csv");
+      envtags_ofstream << "env_id,tag\n";
+      std::cout << "Environment states: " << std::endl;
+      for (size_t i = 0; i < env_state_tags.size(); ++i) {
+        int tag_int = env_state_tags[i].GetUInt(0);
+        std::cout << "[" << i << "]: "; env_state_tags[i].Print(); std::cout << "(" << tag_int << ")" << std::endl;
+        envtags_ofstream << i << ","; env_state_tags[i].Print(envtags_ofstream); envtags_ofstream << "\n";
       }
-      for (size_t i = 0; i < ENVIRONMENT_STATES; ++i) {
-        env_state_tags.emplace_back(tag_t());
-        for (size_t c = 0; c < env_hc_tag_16_strs[i].size(); ++c) {
-          if (env_hc_tag_16_strs[i][c] == '0') env_state_tags[i].Set(c, 0);
-          else env_state_tags[i].Set(c, 1);
+      envtags_ofstream.close();
+    } else {
+      // Load tags from local file.
+      env_state_tags.resize(ENVIRONMENT_STATES, tag_t());
+
+      std::ifstream tag_fstream("env_tags.csv");
+      if (!tag_fstream.is_open()) {
+        std::cout << "Failed to open env_tags.csv. Exiting..." << std::endl;
+        exit(-1);
+      }
+      std::string cur_line;
+      emp::vector<std::string> line_components;
+      std::getline(tag_fstream, cur_line); // Consume header.
+      while (!tag_fstream.eof()) {
+        std::getline(tag_fstream, cur_line);
+        emp::remove_whitespace(cur_line);
+        if (cur_line == emp::empty_string()) continue;
+        emp::slice(cur_line, line_components, ',');
+        int state_id = std::stoi(line_components[0]);
+        for (size_t i = 0; i < line_components[1].size(); ++i) {
+          if (i >= TAG_WIDTH_16) break;
+          if (line_components[1][i] == '1') env_state_tags[state_id].Set(env_state_tags[state_id].GetSize() - i - 1, true);
         }
       }
+      tag_fstream.close();
     }
 
-    // Save out the environment states.
-    std::ofstream envtags_ofstream(DATA_DIRECTORY + "env_tags.csv");
-    envtags_ofstream << "env_id,tag\n";
-    std::cout << "Environment states: " << std::endl;
+    // Print tags
+    std::cout << "ENVIRONMENT STATE TAGS: " << std::endl;
     for (size_t i = 0; i < env_state_tags.size(); ++i) {
-      int tag_int = env_state_tags[i].GetUInt(0);
-      std::cout << "[" << i << "]: "; env_state_tags[i].Print(); std::cout << "(" << tag_int << ")" << std::endl;
-      envtags_ofstream << i << ","; env_state_tags[i].Print(envtags_ofstream); envtags_ofstream << "\n";
+      std::cout << "State " << i << " tag: "; env_state_tags[i].Print(); std::cout << std::endl;
     }
-    envtags_ofstream.close();
 
     // Initialize task input buffer. (for evaluation hardware)
     task_inputs.resize(TASK_INPUT_CNT);
@@ -429,6 +472,19 @@ public:
     // Make the world.
     world = emp::NewPtr<world_t>(random, "ChgEnv-World");
     world->Reset();
+    // Configure the world.
+    world->SetWellMixed(true);
+    // TODO: edit mutation function.
+    world->SetMutFun([this](Agent & agent, emp::Random & rnd) { return this->Mutate(agent, rnd); });
+    if (FITNESS_CALC_TYPE == FIT_TYPE__MIN) {
+      world->SetFitFun([this](Agent & agent) { return this->CalcFitness__MIN(agent); });
+    } else if (FITNESS_CALC_TYPE == FIT_TYPE__AVG) {
+      world->SetFitFun([this](Agent & agent) { return this->CalcFitness__AVG(agent); });
+    } else {
+      std::cout << "Don't recognize fitness calc type. " << std::endl;
+      exit(-1);
+    }
+
 
     // Create empty instruction/event libraries.
     inst_lib = emp::NewPtr<inst_lib_t>();
@@ -464,22 +520,51 @@ public:
     inst_lib->AddInst("Nop", hardware_t::Inst_Nop, 0, "No operation.");
     inst_lib->AddInst("Fork", Inst_Fork, 0, "Fork a new thread. Local memory contents of callee are loaded into forked thread's input memory.");
     inst_lib->AddInst("Nand", Inst_Nand, 3, "WM[ARG3]=~(WM[ARG1]&WM[ARG2])");
-    inst_lib->AddInst("Load-1", [this](hardware_t & hw, const inst_t & inst) {
-      state_t & state = hw.GetCurState();
-      state.SetLocal(inst.args[0], this->task_inputs[load_id]); // Load input.
-      this->load_id += 1; if (this->load_id >= this->task_inputs.size()) this->load_id = 0; // Update load ID.
-    }, 1, "WM[ARG1] = Next task input.");
-    inst_lib->AddInst("Load-2", [this](hardware_t & hw, const inst_t & inst) {
-      state_t & state = hw.GetCurState();
-      state.SetLocal(inst.args[0], this->task_inputs[0]);
-      state.SetLocal(inst.args[1], this->task_inputs[1]);
-    }, 2, "WM[ARG1] = TASKIN[0]; WM[ARG2]=TASKIN[1]");
 
-    // Configure changing environment instructions
-    if (CHANGING_ENVIRONMENT) {
+    if (PROBLEM == PROBLEM_ID__TASKS) {
+      CHANGING_ENVIRONMENT = false;
+      score_agent = [this](Agent & agent, size_t i) { return Score__TasksProb(agent, i); };
+      // Add TASKS problem-specific instructions.
+      inst_lib->AddInst("Load-1", [this](hardware_t & hw, const inst_t & inst) {
+        state_t & state = hw.GetCurState();
+        state.SetLocal(inst.args[0], this->task_inputs[load_id]); // Load input.
+        this->load_id += 1; if (this->load_id >= this->task_inputs.size()) this->load_id = 0; // Update load ID.
+      }, 1, "WM[ARG1] = Next task input.");
+      inst_lib->AddInst("Load-2", [this](hardware_t & hw, const inst_t & inst) {
+        state_t & state = hw.GetCurState();
+        state.SetLocal(inst.args[0], this->task_inputs[0]);
+        state.SetLocal(inst.args[1], this->task_inputs[1]);
+      }, 2, "WM[ARG1] = TASKIN[0]; WM[ARG2]=TASKIN[1]");
+      inst_lib->AddInst("Submit", [this](hardware_t & hw, const inst_t & inst) { this->Inst_Submit(hw, inst); }, 1, "Submit WM[ARG1] as potential task solution.");
+
+    } else if (PROBLEM == PROBLEM_ID__CHANGING_ENV_WITH_TASKS) {
+      CHANGING_ENVIRONMENT = true;
+      score_agent = [this](Agent & agent, size_t i) { return Score__ChgEnvWithTasksProg(agent, i); };
+      // Add problem-specific instructions.
       // Add conditional submit instruction.
+      inst_lib->AddInst("Load-1", [this](hardware_t & hw, const inst_t & inst) {
+        state_t & state = hw.GetCurState();
+        state.SetLocal(inst.args[0], this->task_inputs[load_id]); // Load input.
+        this->load_id += 1; if (this->load_id >= this->task_inputs.size()) this->load_id = 0; // Update load ID.
+      }, 1, "WM[ARG1] = Next task input.");
+      inst_lib->AddInst("Load-2", [this](hardware_t & hw, const inst_t & inst) {
+        state_t & state = hw.GetCurState();
+        state.SetLocal(inst.args[0], this->task_inputs[0]);
+        state.SetLocal(inst.args[1], this->task_inputs[1]);
+      }, 2, "WM[ARG1] = TASKIN[0]; WM[ARG2]=TASKIN[1]");
       inst_lib->AddInst("Submit", [this](hardware_t & hw, const inst_t & inst) { this->Inst_Submit__COND(hw, inst); }, 1, "Submit WM[ARG1] as potential task solution.");
 
+    } else if (PROBLEM == PROBLEM_ID__CHANGING_ENV) {
+      CHANGING_ENVIRONMENT = true;
+      score_agent = [this](Agent & agent, size_t i) { return Score__ChgEnvProb(agent, i); };
+
+    } else {
+      std::cout << "Do not recognize requested problem!" << std::endl;
+      exit(-1);
+    }
+
+    // Setup a changing environment.
+    if (CHANGING_ENVIRONMENT) {
       // Generate a SetState instruction for every possible environment state.
       for (int i = 0; i < ENVIRONMENT_STATES; ++i) {
         inst_lib->AddInst("SetState" + emp::to_string(i),
@@ -504,7 +589,7 @@ public:
         event_lib->RegisterDispatchFun("EnvSignal", DispatchEvent__EnvSignal_IMP);
       }
 
-      // Are agent able to actively sense (poll) the environment?
+      // Are agents able to actively sense (poll) the environment?
       if (ACTIVE_SENSING) {
         if (ANALYZE_MODE && TEASER_SENSORS) {
           // Use teaser sensors.
@@ -529,17 +614,7 @@ public:
             "Sense if current environment state is " + emp::to_string(i));
         }
       }
-    } else {
-      // Not changing environment
-      inst_lib->AddInst("Submit", [this](hardware_t & hw, const inst_t & inst) { this->Inst_Submit(hw, inst); }, 1, "Submit WM[ARG1] as potential task solution.");
     }
-
-
-    // Configure the world.
-    world->SetWellMixed(true);
-    // TODO: edit mutation function.
-    world->SetMutFun([this](Agent & agent, emp::Random & rnd) { return this->Mutate(agent, rnd); });
-    world->SetFitFun([this](Agent & agent) { return this->CalcFitness(agent); });
 
     // Configure evaluation hardware.
     eval_hw = emp::NewPtr<hardware_t>(inst_lib, event_lib, random);
@@ -553,21 +628,21 @@ public:
       sys_file.SetTimingRepeat(SYSTEMATICS_INTERVAL);
       auto & fit_file = world->SetupFitnessFile(DATA_DIRECTORY + "fitness.csv");
       fit_file.SetTimingRepeat(FITNESS_INTERVAL);
-    }
-
-    // Hacking in these analyses
-    if (TEASER_SENSORS && !TEASER_EVENTS) {
-      analysis_scores_fname = DATA_DIRECTORY + "no_sensors.csv";
-    } else if (TEASER_EVENTS && !TEASER_SENSORS) {
-      analysis_scores_fname = DATA_DIRECTORY + "no_events.csv";
-    } else if (TEASER_EVENTS && TEASER_SENSORS) {
-      analysis_scores_fname = DATA_DIRECTORY + "no_sensors_no_events.csv";
-    } else {
-      analysis_scores_fname = DATA_DIRECTORY + "fdom.csv";
+    } else { // In analysis mode.
+      // Hacking in these analyses
+      if (TEASER_SENSORS && !TEASER_EVENTS) {
+        analysis_scores_fname = DATA_DIRECTORY + "no_sensors.csv";
+      } else if (TEASER_EVENTS && !TEASER_SENSORS) {
+        analysis_scores_fname = DATA_DIRECTORY + "no_events.csv";
+      } else if (TEASER_EVENTS && TEASER_SENSORS) {
+        analysis_scores_fname = DATA_DIRECTORY + "no_sensors_no_events.csv";
+      } else {
+        analysis_scores_fname = DATA_DIRECTORY + "fdom.csv";
+      }
     }
   }
 
-  ~ChangingEnvironmentExp() {
+  ~LogicOperationsExp() {
     eval_hw.Delete();
     world.Delete();
     inst_lib.Delete();
@@ -609,46 +684,58 @@ public:
       std::cout << " -------------------------" << std::endl;
       world->Inject(ancestor_prog, POP_SIZE);    // Inject a bunch of ancestors into the population.
     }
-    // TODO: add multiple trials in
     // Population initialization done, ready to run evolution!
     double best_score = 0;
-    size_t best_agent = 0;
+    // Evolution!
     for (size_t ud = 0; ud <= GENERATIONS; ++ud) {
       // Evaluate each agent.
       best_score = 0;
-      best_agent = 0;
       for (size_t id = 0; id < world->GetSize(); ++id) {
         Agent & agent = world->GetOrg(id);
-        agent.env_state_matches = 0;
-        agent.task_completions.resize(TASK_CNT, 0);
-        agent.task_credits.resize(TASK_CNT, 0);
-        env_state = -1;  // Reset the environment state.
-        ResetTasks();
+        agent.env_matches_by_trial.resize(TRIAL_CNT, 0);
+        agent.task_completions_by_trial.resize(TRIAL_CNT, emp::vector<size_t>(TASK_CNT, 0));
+        agent.task_credits_by_trial.resize(TRIAL_CNT, emp::vector<size_t>(TASK_CNT, 0));
+        agent.scores_by_trial.resize(TRIAL_CNT, 0);
+
         LoadHWProgram(world->GetGenomeAt(id)); // Load agent's program into evaluation hardware.
-        // Run the hardware for some amount of time.
-        for (size_t t = 1; t < EVAL_TIME; ++t) {
-          if (CHANGING_ENVIRONMENT && (env_state == -1 || random->P(ENVIRONMENT_CHG_PROB))) {
-            // Change the environment to a random state!
-            env_state = random->GetUInt(ENVIRONMENT_STATES);
-            // Trigger environment state event.
-            eval_hw->TriggerEvent("EnvSignal", env_state_tags[env_state]);
+
+        // Evaluate a single agent (for some number of trials).
+        for (size_t trialID = 0; trialID < TRIAL_CNT; ++trialID) {
+          env_state = -1;  // Reset the environment state.
+          ResetTasks();    // Reset tasks.
+          if (trialID > 0) {
+            ResetHW();
           }
-          // Run hardware for a time step.
-          eval_hw->SingleProcess();
-          // Does hardware state match environment state?
-          if (eval_hw->GetTrait(TRAIT_ID__STATE) == env_state) {
-            agent.env_state_matches += 1;
+          // Run the hardware for some amount of time.
+          for (eval_update = 0; eval_update < EVAL_TIME; ++eval_update) {
+            if (CHANGING_ENVIRONMENT && (env_state == -1 || random->P(ENVIRONMENT_CHG_PROB))) {
+              // Change the environment to a random state!
+              env_state = random->GetUInt(ENVIRONMENT_STATES);
+              // Trigger environment state event.
+              eval_hw->TriggerEvent("EnvSignal", env_state_tags[env_state]);
+            }
+            // Run hardware for a time step.
+            eval_hw->SingleProcess();
+            // Does hardware state match environment state?
+            if (eval_hw->GetTrait(TRAIT_ID__STATE) == env_state) {
+              agent.env_matches_by_trial[trialID] += 1;
+            }
           }
-        }
-        // Update agent's task completion info.
-        for (size_t i = 0; i < tasks_info.size(); ++i) {
-          agent.task_completions[i] = tasks_info[i].completed;
-          agent.task_credits[i] = tasks_info[i].credited;
+
+          // Update agent's task completion info.
+          for (size_t i = 0; i < tasks_info.size(); ++i) {
+            agent.task_completions_by_trial[trialID][i] = tasks_info[i].completed;
+            agent.task_credits_by_trial[trialID][i] = tasks_info[i].credited;
+          }
+
+          // Compute score
+          agent.scores_by_trial[trialID] = score_agent(agent, trialID);
         }
         // Compute some relevant information about performance.
-        double fitness = CalcFitness(agent);
-        if (fitness > best_score) { best_score = fitness; best_agent = id; }
+        double fitness = CalcFitness__MIN(agent);
+        if (fitness > best_score) { best_score = fitness; }
       }
+
       // Selection
       // Keep the best program around.
       emp::EliteSelect(*world, 1, 1);
@@ -685,60 +772,84 @@ public:
         std::cout << " --- Analysis program: ---" << std::endl;
         analyze_prog.PrintProgramFull();
         std::cout << " -------------------------" << std::endl;
-        // Setup environment.
-        env_state = -1;  // Reset the environment state.
-        ResetTasks();    // Reset logic tasks.
 
-        std::cout << "--- TASK SOLUTIONS --" << std::endl;
-        for (size_t i = 0; i < tasks_info.size(); ++i) {
-          std::cout << "TASK: " << tasks_info[i].task << std::endl;
-          std::cout << "  Solutions:";
-          for (size_t k = 0; k < tasks_info[i].solutions.size(); ++k) {
-            std::cout << "  " << tasks_info[i].solutions[k];
-          } std::cout << std::endl;
-        }
-        std::cout << " -------------------------" << std::endl;
-
-        // Load program to hardware.
-        LoadHWProgram(analyze_prog); // Load agent's program into evaluation hardware.
         Agent agent(analyze_prog);
-        agent.env_state_matches = 0;
-        agent.task_completions.resize(TASK_CNT, 0);
-        agent.task_credits.resize(TASK_CNT, 0);
-        // Run the hardware for some amount of time.
-        std::cout << "\n\nBEGIN AGENT EVALUATION" << std::endl;
-        eval_hw->PrintState();
-        for (size_t t = 1; t < EVAL_TIME; ++t) {
-          std::cout << "================= TIME: " << t << " =================" << std::endl;
-          if (CHANGING_ENVIRONMENT && (env_state == -1 || random->P(ENVIRONMENT_CHG_PROB))) {
-            std::cout << "  ENV CHG: " << env_state << " --> ";
-            // Change the environment to a random state!
-            env_state = random->GetUInt(ENVIRONMENT_STATES);
-            std::cout << env_state << std::endl;
-            // Trigger environment state event.
-            eval_hw->TriggerEvent("EnvSignal", env_state_tags[env_state]);
+        agent.env_matches_by_trial.resize(TRIAL_CNT, 0);
+        agent.task_completions_by_trial.resize(TRIAL_CNT, emp::vector<size_t>(TASK_CNT, 0));
+        agent.task_credits_by_trial.resize(TRIAL_CNT, emp::vector<size_t>(TASK_CNT, 0));
+        agent.scores_by_trial.resize(TRIAL_CNT, 0);
+
+        LoadHWProgram(analyze_prog); // Load agent's program into evaluation hardware.
+        // Evaluate a single agent (for some number of trials).
+        for (size_t trialID = 0; trialID < TRIAL_CNT; ++trialID) {
+          env_state = -1;  // Reset the environment state.
+          ResetTasks();    // Reset tasks.
+          if (trialID > 0) {
+            ResetHW();
           }
-          std::cout << "Environment state: " << env_state << std::endl;
-          // Run hardware for a time step.
-          eval_hw->SingleProcess();
+          std::cout << "================ TRIAL " << trialID << "================" << std::endl;
+
+          std::cout << "--- TASK SOLUTIONS --" << std::endl;
+          for (size_t i = 0; i < tasks_info.size(); ++i) {
+            std::cout << "TASK: " << tasks_info[i].task << std::endl;
+            std::cout << "  Solutions:";
+            for (size_t k = 0; k < tasks_info[i].solutions.size(); ++k) {
+              std::cout << "  " << tasks_info[i].solutions[k];
+            } std::cout << std::endl;
+          }
+          std::cout << " -------------------------" << std::endl;
+          std::cout << "\n\nBEGIN AGENT EVALUATION" << std::endl;
           eval_hw->PrintState();
-          // Does hardware state match environment state?
-          if (eval_hw->GetTrait(TRAIT_ID__STATE) == env_state) {
-            agent.env_state_matches += 1;
+          // Run the hardware for some amount of time.
+          for (eval_update = 0; eval_update < EVAL_TIME; ++eval_update) {
+            std::cout << "================= TIME: " << eval_update << " =================" << std::endl;
+            if (CHANGING_ENVIRONMENT && (env_state == -1 || random->P(ENVIRONMENT_CHG_PROB))) {
+              std::cout << "  ENV CHG: " << env_state << " --> ";
+              // Change the environment to a random state!
+              env_state = random->GetUInt(ENVIRONMENT_STATES);
+              std::cout << env_state << std::endl;
+              // Trigger environment state event.
+              eval_hw->TriggerEvent("EnvSignal", env_state_tags[env_state]);
+            }
+            std::cout << "Environment state: " << env_state << std::endl;
+            // Run hardware for a time step.
+            eval_hw->SingleProcess();
+            eval_hw->PrintState();
+            // Does hardware state match environment state?
+            if (eval_hw->GetTrait(TRAIT_ID__STATE) == env_state) {
+              agent.env_matches_by_trial[trialID] += 1;
+            }
+          }
+          // Update agent's task completion info.
+          for (size_t i = 0; i < tasks_info.size(); ++i) {
+            agent.task_completions_by_trial[trialID][i] = tasks_info[i].completed;
+            agent.task_credits_by_trial[trialID][i] = tasks_info[i].credited;
+          }
+          // Compute score
+          agent.scores_by_trial[trialID] = score_agent(agent, trialID);
+          std::cout << "\nTrial score: " << agent.scores_by_trial[trialID] << "\n" << std::endl;
+        }
+
+        std::cout << "\n\nAGENT EVALUATION SUMMARY" << std::endl;
+        std::cout << "Agent fitness (min): " << CalcFitness__MIN(agent) << std::endl;
+        std::cout << "Agent fitness (avg): " << CalcFitness__AVG(agent) << std::endl;
+
+        std::cout << "Agent scores:";
+        for (size_t i = 0; i < agent.scores_by_trial.size(); ++i) std::cout << "  " << agent.scores_by_trial[i];
+        std::cout << std::endl;
+
+        std::cout << "Env match scores:";
+        for (size_t i = 0; i < agent.env_matches_by_trial.size(); ++i) std::cout << "  " << agent.env_matches_by_trial[i];
+        std::cout << std::endl;
+
+        std::cout << "Tasks summary: " << std::endl;
+        for (size_t ti = 0; ti < TRIAL_CNT; ++ti) {
+          for (size_t i = 0; i < TASK_CNT; ++i) {
+            std::cout << "  Task: " << tasks_info[i].task << " ("<< tasks_info[i].id <<")" << std::endl;
+            std::cout << "    Comp: " << agent.task_completions_by_trial[ti][i] << std::endl;
+            std::cout << "    Cred: " << agent.task_credits_by_trial[ti][i] << std::endl;
           }
         }
-        // Update agent's task completion info.
-        for (size_t i = 0; i < tasks_info.size(); ++i) {
-          agent.task_completions[i] = tasks_info[i].completed;
-          agent.task_credits[i] = tasks_info[i].credited;
-        }
-        std::cout << "\n\nAGENT EVALUATION SUMMARY" << std::endl;
-        std::cout << "Env match score: " << agent.env_state_matches << std::endl;
-        std::cout << "-- Tasks summary --" << std::endl;
-        for (size_t i = 0; i < tasks_info.size(); ++i) {
-          std::cout << "  " << tasks_info[i].task << ": {COMP: " << tasks_info[i].completed << ", CRED: " << tasks_info[i].credited << "}" << std::endl;
-        }
-        // Print some info.
         break;
       }
       default:
@@ -774,6 +885,8 @@ public:
       Task & task = tasks_info[i];
       task.completed = 0;
       task.credited = 0;
+      task.comp_time_stamps.resize(0);
+      task.cred_time_stamps.resize(0);
       task.calc_solutions(a, b);
     }
     load_id = 0;
@@ -858,30 +971,103 @@ public:
           }
         }
       }
+      // Insertion/deletion mutations?
+      // - Compute insertions.
+      int num_ins = rnd.GetRandBinomial(program[fID].GetSize(), PER_INST__INS_RATE);
+      // Ensure that insertions (+deletions) don't exceed maximum function length.
+      if ((num_ins + program[fID].GetSize()) > PROG_MAX_FUNC_LEN) {
+        num_ins = PROG_MAX_FUNC_LEN - program[fID].GetSize();
+      }
+      // Do we need to do any insertions or deletions?
+      if (num_ins > 0 || PER_INST__DEL_RATE > 0.0) {
+        emp::vector<size_t> ins_locs = emp::RandomUIntVector(rnd, num_ins, 0, program[fID].GetSize());
+        if (ins_locs.size()) std::sort(ins_locs.begin(), ins_locs.end(), std::greater<size_t>());
+        hardware_t::Function new_fun(program[fID].GetAffinity());
+        size_t rhead = 0;
+        size_t num_dels = 0;
+        while (rhead < program[fID].GetSize()) {
+          if (num_ins) {
+            if (rhead >= ins_locs.back()) {
+              // Insert a random instruction.
+              new_fun.PushInst(rnd.GetUInt(program.GetInstLib()->GetSize()),
+                               rnd.GetInt(PROG_MAX_ARG_VAL),
+                               rnd.GetInt(PROG_MAX_ARG_VAL),
+                               rnd.GetInt(PROG_MAX_ARG_VAL),
+                               tag_t());
+              new_fun.inst_seq.back().affinity.Randomize(rnd);
+              ++mut_cnt;
+              ins_locs.pop_back();
+              continue;
+            }
+          }
+          // Do we delete this instruction?
+          if (rnd.P(PER_INST__DEL_RATE) && num_dels < (program[fID].GetSize() - 1)) {
+            ++mut_cnt;
+            ++num_dels;
+          } else {
+            new_fun.PushInst(program[fID][rhead]);
+          }
+          ++rhead;
+        }
+        program[fID] = new_fun;
+      }
     }
     return mut_cnt;
   }
 
   /// Fitness function.
-  double CalcFitness(Agent & agent) {
-    if (!agent.trial_scores.size()) return 0.0;
-    double val = agent.trial_scores[0];
-    for (size_t i = 0; i < agent.trial_scores.size(); ++i) {
-      if (agent.trial_scores[i] < val) val = agent.trial_scores[i];
+  double CalcFitness__MIN(Agent & agent) {
+    if (!agent.scores_by_trial.size()) return 0.0;
+    double val = agent.scores_by_trial[0];
+    for (size_t i = 0; i < agent.scores_by_trial.size(); ++i) {
+      if (agent.scores_by_trial[i] < val) val = agent.scores_by_trial[i];
     }
     return val;
   }
 
-  double Score__ChgEnvProb(Agent & agent) {
-    return 0.0;
+  double CalcFitness__AVG(Agent & agent) {
+    if (!agent.scores_by_trial.size()) return 0.0;
+    double val = 0.0;
+    for (size_t i = 0; i < agent.scores_by_trial.size(); ++i) {
+      val += agent.scores_by_trial[i];
+    }
+    return val / agent.scores_by_trial.size();
   }
 
-  double Score__TasksProb(Agent & agent) {
-    return 0.0
+  double Score__ChgEnvProb(Agent & agent, size_t trialID) {
+    return (double)agent.env_matches_by_trial[trialID];
   }
 
-  double Score__ChgEnvWithTasksProg(Agent & agent) {
-    return 0.0
+  double Score__TasksProb(Agent & agent, size_t trialID) {
+    int score = 0;
+    for (size_t i = 0; i < TASK_CNT; ++i) {
+      if (tasks_info[i].completed > 0) score += 1;
+    }
+    if (score == TASK_CNT) { // If all tasks were completed, when was final task done?
+      int all_tasks_update = -1;
+      for (size_t i = 0; i < TASK_CNT; ++i) {
+        if (tasks_info[i].comp_time_stamps[0] > all_tasks_update)
+          all_tasks_update = tasks_info[i].comp_time_stamps[0];
+      }
+      score += EVAL_TIME - all_tasks_update;
+    }
+    return (double)score;
+  }
+
+  double Score__ChgEnvWithTasksProg(Agent & agent, size_t trialID) {
+    int score = 0;
+    for (size_t i = 0; i < TASK_CNT; ++i) {
+      if (tasks_info[i].credited > 0) score += 1;
+    }
+    if (score == TASK_CNT) { // If all tasks were completed, when was final task done?
+      int all_tasks_update = -1;
+      for (size_t i = 0; i < TASK_CNT; ++i) {
+        if (tasks_info[i].cred_time_stamps[0] > all_tasks_update)
+          all_tasks_update = tasks_info[i].cred_time_stamps[0];
+      }
+      score += EVAL_TIME - all_tasks_update;
+    }
+    return (double)score;
   }
 
   /// This function takes a snapshot of the world.
@@ -953,7 +1139,9 @@ public:
       for (size_t s = 0; s < task.solutions.size(); ++s) {
         if (task.solutions[s] == sol) {
           task.completed += 1;
+          task.comp_time_stamps.emplace_back(eval_update);
           task.credited += 1;
+          task.cred_time_stamps.emplace_back(eval_update);
         }
       }
     }
@@ -972,7 +1160,11 @@ public:
       for (size_t s = 0; s < task.solutions.size(); ++s) {
         if (task.solutions[s] == sol) {
           task.completed += 1;
-          if (hw.GetTrait(TRAIT_ID__STATE) == env_state) task.credited += 1;
+          task.comp_time_stamps.emplace_back(eval_update);
+          if (hw.GetTrait(TRAIT_ID__STATE) == env_state) {
+            task.credited += 1;
+            task.cred_time_stamps.emplace_back(eval_update);
+          }
         }
       }
     }
@@ -998,7 +1190,7 @@ int main(int argc, char * argv[]) {
   // Read configs.
   std::string config_fname = "configs.cfg";
   auto args = emp::cl::ArgManager(argc, argv);
-  ChangingEnvironmentConfig config;
+  LogicOperationsConfig config;
   config.Read(config_fname);
   if (args.ProcessConfigOptions(config, std::cout, config_fname, "changing_environment-config.h") == false) exit(0);
   if (args.TestUnknown() == false) exit(0);
@@ -1010,6 +1202,6 @@ int main(int argc, char * argv[]) {
   std::cout << "==============================\n" << std::endl;
 
   // Create experiment with configs, then run it!
-  ChangingEnvironmentExp e(config);
+  LogicOperationsExp e(config);
   e.Run();
 }
