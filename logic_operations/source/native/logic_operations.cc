@@ -40,8 +40,9 @@ constexpr size_t TASK_ID__XOR = 7;
 constexpr size_t TASK_ID__EQU = 8;
 constexpr size_t TASK_ID__ECHO = 9;
 
-constexpr int MAX_TASK_INPUT = 32767;
-constexpr int MIN_TASK_INPUT = -32767;
+using task_input_t = uint32_t;
+constexpr task_input_t MIN_TASK_INPUT = 0; //-32767;
+constexpr task_input_t MAX_TASK_INPUT = 1000000000; //32767;
 
 constexpr size_t PROBLEM_ID__TASKS = 0;
 constexpr size_t PROBLEM_ID__CHANGING_ENV = 1;
@@ -137,16 +138,16 @@ public:
   struct Task {
     std::string task;
     int id;
-    emp::vector<int> solutions;
+    emp::vector<task_input_t> solutions;
     size_t completed;
     size_t credited;
     emp::vector<size_t> comp_time_stamps;              // Time stamp for each time it was completed.
     emp::vector<size_t> cred_time_stamps;
-    std::function<void(int,int)> calc_solutions;
+    std::function<void(task_input_t,task_input_t)> calc_solutions;
 
     Task() : task(""), id(-1), solutions(), completed(0), credited(0), comp_time_stamps(), cred_time_stamps(), calc_solutions() { ; }
 
-    Task(std::string _name, int _id, emp::vector<int> _sol = emp::vector<int>())
+    Task(std::string _name, int _id, emp::vector<task_input_t> _sol = emp::vector<task_input_t>())
       : task(_name), id(_id), solutions(_sol), completed(0), credited(0), comp_time_stamps(), cred_time_stamps(), calc_solutions()
     { ; }
   };
@@ -221,7 +222,7 @@ protected:
   emp::vector<tag_t> env_state_tags; ///< Affinities associated with each environment state.
 
   emp::vector<Task> tasks_info;
-  emp::vector<int> task_inputs;
+  emp::vector<task_input_t> task_inputs;
   size_t load_id;
 
   int env_state;
@@ -375,7 +376,7 @@ public:
     Task & nand_task = tasks_info[TASK_ID__NAND];
     nand_task.task = "NAND";
     nand_task.id = TASK_ID__NAND;
-    nand_task.calc_solutions = [this](int a, int b) {
+    nand_task.calc_solutions = [this](task_input_t a, task_input_t b) {
       this->tasks_info[TASK_ID__NAND].solutions.resize(0);
       this->tasks_info[TASK_ID__NAND].solutions.emplace_back(~(a&b));
     };
@@ -383,7 +384,7 @@ public:
     Task & not_task = tasks_info[TASK_ID__NOT];
     not_task.task = "NOT";
     not_task.id = TASK_ID__NOT;
-    not_task.calc_solutions = [this](int a, int b) {
+    not_task.calc_solutions = [this](task_input_t a, task_input_t b) {
       this->tasks_info[TASK_ID__NOT].solutions.resize(0);
       this->tasks_info[TASK_ID__NOT].solutions.emplace_back(~a);
       this->tasks_info[TASK_ID__NOT].solutions.emplace_back(~b);
@@ -392,7 +393,7 @@ public:
     Task & orn_task = tasks_info[TASK_ID__ORN];
     orn_task.task = "ORN";
     orn_task.id = TASK_ID__ORN;
-    orn_task.calc_solutions = [this](int a, int b) {
+    orn_task.calc_solutions = [this](task_input_t a, task_input_t b) {
       this->tasks_info[TASK_ID__ORN].solutions.resize(0);
       this->tasks_info[TASK_ID__ORN].solutions.emplace_back((a|(~b)));
       this->tasks_info[TASK_ID__ORN].solutions.emplace_back((b|(~a)));
@@ -401,7 +402,7 @@ public:
     Task & and_task = tasks_info[TASK_ID__AND];
     and_task.task = "AND";
     and_task.id = TASK_ID__AND;
-    and_task.calc_solutions = [this](int a, int b) {
+    and_task.calc_solutions = [this](task_input_t a, task_input_t b) {
       this->tasks_info[TASK_ID__AND].solutions.resize(0);
       this->tasks_info[TASK_ID__AND].solutions.emplace_back(a&b);
     };
@@ -409,7 +410,7 @@ public:
     Task & or_task = tasks_info[TASK_ID__OR];
     or_task.task = "OR";
     or_task.id = TASK_ID__OR;
-    or_task.calc_solutions = [this](int a, int b) {
+    or_task.calc_solutions = [this](task_input_t a, task_input_t b) {
       this->tasks_info[TASK_ID__OR].solutions.resize(0);
       this->tasks_info[TASK_ID__OR].solutions.emplace_back(a|b);
     };
@@ -417,7 +418,7 @@ public:
     Task & andn_task = tasks_info[TASK_ID__ANDN];
     andn_task.task = "ANDN";
     andn_task.id = TASK_ID__ANDN;
-    andn_task.calc_solutions = [this](int a, int b) {
+    andn_task.calc_solutions = [this](task_input_t a, task_input_t b) {
       this->tasks_info[TASK_ID__ANDN].solutions.resize(0);
       this->tasks_info[TASK_ID__ANDN].solutions.emplace_back((a&(~b)));
       this->tasks_info[TASK_ID__ANDN].solutions.emplace_back((b&(~a)));
@@ -426,7 +427,7 @@ public:
     Task & nor_task = tasks_info[TASK_ID__NOR];
     nor_task.task = "NOR";
     nor_task.id = TASK_ID__NOR;
-    nor_task.calc_solutions = [this](int a, int b) {
+    nor_task.calc_solutions = [this](task_input_t a, task_input_t b) {
       this->tasks_info[TASK_ID__NOR].solutions.resize(0);
       this->tasks_info[TASK_ID__NOR].solutions.emplace_back(~(a|b));
     };
@@ -434,7 +435,7 @@ public:
     Task & xor_task = tasks_info[TASK_ID__XOR];
     xor_task.task = "XOR";
     xor_task.id = TASK_ID__XOR;
-    xor_task.calc_solutions = [this](int a, int b) {
+    xor_task.calc_solutions = [this](task_input_t a, task_input_t b) {
       this->tasks_info[TASK_ID__XOR].solutions.resize(0);
       this->tasks_info[TASK_ID__XOR].solutions.emplace_back(a^b);
     };
@@ -442,7 +443,7 @@ public:
     Task & equ_task = tasks_info[TASK_ID__EQU];
     equ_task.task = "EQU";
     equ_task.id = TASK_ID__EQU;
-    equ_task.calc_solutions = [this](int a, int b) {
+    equ_task.calc_solutions = [this](task_input_t a, task_input_t b) {
       this->tasks_info[TASK_ID__EQU].solutions.resize(0);
       this->tasks_info[TASK_ID__EQU].solutions.emplace_back(~(a^b));
     };
@@ -450,7 +451,7 @@ public:
     Task & echo_task = tasks_info[TASK_ID__ECHO];
     echo_task.task = "ECHO";
     echo_task.id = TASK_ID__ECHO;
-    echo_task.calc_solutions = [this](int a, int b) {
+    echo_task.calc_solutions = [this](task_input_t a, task_input_t b) {
       this->tasks_info[TASK_ID__ECHO].solutions.resize(0);
       this->tasks_info[TASK_ID__ECHO].solutions.emplace_back(a);
       this->tasks_info[TASK_ID__ECHO].solutions.emplace_back(b);
@@ -474,7 +475,6 @@ public:
     world->Reset();
     // Configure the world.
     world->SetWellMixed(true);
-    // TODO: edit mutation function.
     world->SetMutFun([this](Agent & agent, emp::Random & rnd) { return this->Mutate(agent, rnd); });
     if (FITNESS_CALC_TYPE == FIT_TYPE__MIN) {
       world->SetFitFun([this](Agent & agent) { return this->CalcFitness__MIN(agent); });
@@ -721,13 +721,11 @@ public:
               agent.env_matches_by_trial[trialID] += 1;
             }
           }
-
           // Update agent's task completion info.
           for (size_t i = 0; i < tasks_info.size(); ++i) {
             agent.task_completions_by_trial[trialID][i] = tasks_info[i].completed;
             agent.task_credits_by_trial[trialID][i] = tasks_info[i].credited;
           }
-
           // Compute score
           agent.scores_by_trial[trialID] = score_agent(agent, trialID);
         }
@@ -828,9 +826,20 @@ public:
           // Compute score
           agent.scores_by_trial[trialID] = score_agent(agent, trialID);
           std::cout << "\nTrial score: " << agent.scores_by_trial[trialID] << "\n" << std::endl;
+          for (size_t i = 0; i < TASK_CNT; ++i) {
+            std::cout << "  Task: " << tasks_info[i].task << " ("<< tasks_info[i].id <<")" << std::endl;
+            std::cout << "    Comp: " << tasks_info[i].completed << std::endl;
+            std::cout << "      Comp: TS:";
+            for (size_t k = 0; k < tasks_info[i].comp_time_stamps.size(); ++k) std::cout << " " << tasks_info[i].comp_time_stamps[k];
+            std::cout << std::endl;
+            std::cout << "    Cred: " << tasks_info[i].credited << std::endl;
+            std::cout << "      Cred TS:";
+            for (size_t k = 0; k < tasks_info[i].cred_time_stamps.size(); ++k) std::cout << " " << tasks_info[i].cred_time_stamps[k];
+            std::cout << std::endl;
+          }
         }
 
-        std::cout << "\n\nAGENT EVALUATION SUMMARY" << std::endl;
+        std::cout << "\n\n\n\nAGENT EVALUATION SUMMARY" << std::endl;
         std::cout << "Agent fitness (min): " << CalcFitness__MIN(agent) << std::endl;
         std::cout << "Agent fitness (avg): " << CalcFitness__AVG(agent) << std::endl;
 
@@ -844,6 +853,7 @@ public:
 
         std::cout << "Tasks summary: " << std::endl;
         for (size_t ti = 0; ti < TRIAL_CNT; ++ti) {
+          std::cout << " --- TRIAL " << ti << " --- " << std::endl;
           for (size_t i = 0; i < TASK_CNT; ++i) {
             std::cout << "  Task: " << tasks_info[i].task << " ("<< tasks_info[i].id <<")" << std::endl;
             std::cout << "    Comp: " << agent.task_completions_by_trial[ti][i] << std::endl;
@@ -870,17 +880,17 @@ public:
   void ResetHW() {
     eval_hw->ResetHardware(); // Reset hardware.
     eval_hw->SetTrait(TRAIT_ID__STATE, -1);
-  }
-
-  void LoadHWProgram(const program_t & program) {
-    ResetHW();
-    eval_hw->SetProgram(program);
     eval_hw->SpawnCore(0, memory_t(), true);
   }
 
+  void LoadHWProgram(const program_t & program) {
+    eval_hw->SetProgram(program);
+    ResetHW();
+  }
+
   void ResetTasks() {
-    const int a = random->GetInt(MIN_TASK_INPUT, MAX_TASK_INPUT);
-    const int b = random->GetInt(MIN_TASK_INPUT, MAX_TASK_INPUT);
+    const task_input_t a = random->GetUInt(MIN_TASK_INPUT, MAX_TASK_INPUT);
+    const task_input_t b = random->GetUInt(MIN_TASK_INPUT, MAX_TASK_INPUT);
     for (size_t i = 0; i < tasks_info.size(); ++i) {
       Task & task = tasks_info[i];
       task.completed = 0;
@@ -986,7 +996,7 @@ public:
         size_t rhead = 0;
         size_t num_dels = 0;
         while (rhead < program[fID].GetSize()) {
-          if (num_ins) {
+          if (ins_locs.size()) {
             if (rhead >= ins_locs.back()) {
               // Insert a random instruction.
               new_fun.PushInst(rnd.GetUInt(program.GetInstLib()->GetSize()),
@@ -1046,10 +1056,12 @@ public:
     if (score == TASK_CNT) { // If all tasks were completed, when was final task done?
       int all_tasks_update = -1;
       for (size_t i = 0; i < TASK_CNT; ++i) {
-        if (tasks_info[i].comp_time_stamps[0] > all_tasks_update)
+        if ((int)tasks_info[i].comp_time_stamps[0] > all_tasks_update) {
           all_tasks_update = tasks_info[i].comp_time_stamps[0];
+        }
+
       }
-      score += EVAL_TIME - all_tasks_update;
+      score += (EVAL_TIME - all_tasks_update);
     }
     return (double)score;
   }
@@ -1062,10 +1074,10 @@ public:
     if (score == TASK_CNT) { // If all tasks were completed, when was final task done?
       int all_tasks_update = -1;
       for (size_t i = 0; i < TASK_CNT; ++i) {
-        if (tasks_info[i].cred_time_stamps[0] > all_tasks_update)
+        if ((int)tasks_info[i].cred_time_stamps[0] > all_tasks_update)
           all_tasks_update = tasks_info[i].cred_time_stamps[0];
       }
-      score += EVAL_TIME - all_tasks_update;
+      score += (EVAL_TIME - all_tasks_update);
     }
     return (double)score;
   }
@@ -1133,7 +1145,7 @@ public:
   ///  - Give credit where credit is due.
   void Inst_Submit(hardware_t & hw, const inst_t & inst) {
     state_t & state = hw.GetCurState();
-    const int sol = (int)state.GetLocal(inst.args[0]);
+    const task_input_t sol = (task_input_t)state.GetLocal(inst.args[0]);
     for (size_t i = 0; i < tasks_info.size(); ++i) {
       Task & task = tasks_info[i];
       for (size_t s = 0; s < task.solutions.size(); ++s) {
@@ -1154,7 +1166,7 @@ public:
   ///  - Give credit where credit is due if internal state == env state.
   void Inst_Submit__COND(hardware_t & hw, const inst_t & inst) {
     state_t & state = hw.GetCurState();
-    const int sol = (int)state.GetLocal(inst.args[0]);
+    const task_input_t sol = (task_input_t)state.GetLocal(inst.args[0]);
     for (size_t i = 0; i < tasks_info.size(); ++i) {
       Task & task = tasks_info[i];
       for (size_t s = 0; s < task.solutions.size(); ++s) {
@@ -1179,8 +1191,8 @@ public:
 
   static void Inst_Nand(hardware_t & hw, const inst_t & inst) {
     state_t & state = hw.GetCurState();
-    const int a = (int)state.GetLocal(inst.args[0]);
-    const int b = (int)state.GetLocal(inst.args[1]);
+    const task_input_t a = (task_input_t)state.GetLocal(inst.args[0]);
+    const task_input_t b = (task_input_t)state.GetLocal(inst.args[1]);
     state.SetLocal(inst.args[2], ~(a&b));
   }
 
