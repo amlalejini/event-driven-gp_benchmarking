@@ -55,6 +55,7 @@ constexpr size_t FIT_TYPE__AVG = 1;
 constexpr size_t TRAIT_ID__STATE = 0; ///< Agent internal state trait.
 
 // Available environment affinity strings.
+// TODO: read these in from file instead of hardcoded in code.
 emp::vector<std::string> env_hc_tag_16_strs = {"0000000000000000",
                                                "1111111111111111",
                                                "1111000000001111",
@@ -171,6 +172,8 @@ protected:
   size_t ENVIRONMENT_STATES;        ///< Number of environment states.
   double ENVIRONMENT_CHG_PROB;      ///< Probability of environment change on update.
   bool RND_ENV_STATE_TAGS;
+  size_t ENVIRONMENT_FALSE_SIGNALS;
+  double ENVIRONMENT_FALSE_SIGNAL_PROB;
 
   // Hardware-specific settings.
   bool ENV_SIGNALS;          ///< Do environment changes trigger events?
@@ -220,10 +223,12 @@ protected:
   emp::Ptr<hardware_t> eval_hw;
 
   emp::vector<tag_t> env_state_tags; ///< Affinities associated with each environment state.
+  emp::vector<tag_t> false_env_state_tags; ///< False environmental signal tags.
 
   emp::vector<Task> tasks_info;
   emp::vector<task_input_t> task_inputs;
   size_t load_id;
+  size_t unique_tasks_credited;
 
   int env_state;
   int eval_update;
@@ -233,7 +238,9 @@ protected:
   std::function<double(Agent &, size_t)> score_agent;
 
 public:
-  LogicOperationsExp(const LogicOperationsConfig & config) : load_id(0), env_state(-1), eval_update(0) {
+  LogicOperationsExp(const LogicOperationsConfig & config)
+  : load_id(0), unique_tasks_credited(0), env_state(-1), eval_update(0)
+  {
     // Fill out experiment parameters with config settings.
     DEBUG_MODE = config.DEBUG_MODE();
     RANDOM_SEED = config.RANDOM_SEED();
@@ -247,6 +254,8 @@ public:
     ENVIRONMENT_STATES = config.ENVIRONMENT_STATES();
     ENVIRONMENT_CHG_PROB = config.ENVIRONMENT_CHG_PROB();
     RND_ENV_STATE_TAGS = config.RND_ENV_STATE_TAGS();
+    ENVIRONMENT_FALSE_SIGNALS = config.ENVIRONMENT_FALSE_SIGNALS();
+    ENVIRONMENT_FALSE_SIGNAL_PROB = config.ENVIRONMENT_FALSE_SIGNAL_PROB();
     ENV_SIGNALS = config.ENV_SIGNALS();
     ACTIVE_SENSING = config.ACTIVE_SENSING();
     HW_MAX_CORES = config.HW_MAX_CORES();
@@ -286,17 +295,18 @@ public:
     // Make our random number generator.
     random = emp::NewPtr<emp::Random>(RANDOM_SEED);
 
-    if (!ANALYZE_MODE) {
-      // Configure the environment.
+    // Configure environment signal information.
+    std::unordered_set<int> uset; // Used to make sure all environment tags are unique.
+    if (!ANALYZE_MODE) { // If we're not in analyze mode, generate environment information.
+      // Generate environment state tags (either randomly or use hand-coded).
       if (RND_ENV_STATE_TAGS) {
         // Generate random (but unique) tags.
-        std::unordered_set<int> uset;
-        if (ENVIRONMENT_STATES > emp::Pow2(TAG_WIDTH_16)) {
+        if (ENVIRONMENT_STATES > (emp::Pow2(TAG_WIDTH_16) / 2.0)) {
           std::cout << "Requested environment states exceeds maximum environment states." << std::endl;
           std::cout << "Setting ENVIRONMENT_STATES to 2^TAG_WIDTH" << std::endl;
-          ENVIRONMENT_STATES = emp::Pow2(TAG_WIDTH_16);
+          ENVIRONMENT_STATES = emp::Pow2(TAG_WIDTH_16) / 2.0;
         }
-        std::cout << "Randomly generating env tags: " << std::endl;
+        std::cout << "Randomly generating env tags." << std::endl;
         for (size_t i = 0; i < ENVIRONMENT_STATES; ++i) {
           env_state_tags.emplace_back(tag_t());
           env_state_tags[i].Randomize(*random);
@@ -326,6 +336,26 @@ public:
           }
         }
       }
+
+      // Generate false environment signals.
+      if (ENVIRONMENT_FALSE_SIGNALS) {
+        std::cout << "Randomly generating false signal tags." << std::endl;
+        for (size_t i = 0; i < ENVIRONMENT_FALSE_SIGNALS; ++i) {
+          false_env_state_tags.emplace_back(tag_t());
+          false_env_state_tags[i].Randomize(*random);
+          int tag_int = false_env_state_tags[i].GetUInt(0);
+          while (true) {
+            if (!emp::Has(uset, tag_int)) {
+              uset.emplace(tag_int);
+              break;
+            } else {
+              false_env_state_tags[i].Randomize(*random);
+              tag_int = false_env_state_tags[i].GetUInt(0);
+            }
+          }
+        }
+      }
+
       // Save out the environment states.
       std::ofstream envtags_ofstream(DATA_DIRECTORY + "env_tags.csv");
       envtags_ofstream << "env_id,tag\n";
@@ -335,11 +365,24 @@ public:
         std::cout << "[" << i << "]: "; env_state_tags[i].Print(); std::cout << "(" << tag_int << ")" << std::endl;
         envtags_ofstream << i << ","; env_state_tags[i].Print(envtags_ofstream); envtags_ofstream << "\n";
       }
+      std::cout << "--" << std::endl;
       envtags_ofstream.close();
-    } else {
-      // Load tags from local file.
-      env_state_tags.resize(ENVIRONMENT_STATES, tag_t());
 
+      // Save out the false signals.
+      std::ofstream falsetags_ofstream(DATA_DIRECTORY + "false_signal_tags.csv");
+      falsetags_ofstream << "tag\n";
+      std::cout << "False signals: " << std::endl;
+      for (size_t i = 0; i < false_env_state_tags.size(); ++i) {
+        int tag_int = false_env_state_tags[i].GetUInt(0);
+        std::cout << "[" << i << "]: "; false_env_state_tags[i].Print(); std::cout << "(" << tag_int << ")" << std::endl;
+        false_env_state_tags[i].Print(falsetags_ofstream); falsetags_ofstream << "\n";
+      }
+      std::cout << "--" << std::endl;
+      falsetags_ofstream.close();
+
+    } else {  // If in ANALYZE_MODE
+      // Load environment tags from local file.
+      env_state_tags.resize(ENVIRONMENT_STATES, tag_t());
       std::ifstream tag_fstream("env_tags.csv");
       if (!tag_fstream.is_open()) {
         std::cout << "Failed to open env_tags.csv. Exiting..." << std::endl;
@@ -360,6 +403,31 @@ public:
         }
       }
       tag_fstream.close();
+
+      // Load false signals from file.
+      if (ENVIRONMENT_FALSE_SIGNALS) {
+        false_env_state_tags.resize(ENVIRONMENT_FALSE_SIGNALS, tag_t());
+        size_t sigID = 0;
+        std::ifstream false_tag_fstream("false_signal_tags.csv");
+        if (!false_tag_fstream.is_open()) {
+          std::cout << "Failed to open false_signal_tags.csv. Exiting..." << std::endl;
+          exit(-1);
+        }
+        std::string cur_line;
+        emp::vector<std::string> line_components;
+        std::getline(false_tag_fstream, cur_line); // Consume header.
+        while (!false_tag_fstream.eof() && sigID < false_env_state_tags.size()) {
+          std::getline(false_tag_fstream, cur_line);
+          emp::remove_whitespace(cur_line);
+          if (cur_line == emp::empty_string()) continue;
+          for (size_t i = 0; i < cur_line.size(); ++i) {
+            if (i >= TAG_WIDTH_16) break;
+            if (cur_line[i] == '1') false_env_state_tags[sigID].Set(false_env_state_tags[sigID].GetSize() - i - 1, true);
+          }
+          ++sigID;
+        }
+        false_tag_fstream.close();
+      }
     }
 
     // Print tags
@@ -367,6 +435,12 @@ public:
     for (size_t i = 0; i < env_state_tags.size(); ++i) {
       std::cout << "State " << i << " tag: "; env_state_tags[i].Print(); std::cout << std::endl;
     }
+    std::cout << "--" << std::endl;
+    std::cout << "FALSE SIGNAL TAGS: " << std::endl;
+    for (size_t i = 0; i < false_env_state_tags.size(); ++i) {
+      std::cout << "False signal " << i << " tag: "; false_env_state_tags[i].Print(); std::cout << std::endl;
+    }
+    std::cout << "--" << std::endl;
 
     // Initialize task input buffer. (for evaluation hardware)
     task_inputs.resize(TASK_INPUT_CNT);
@@ -485,7 +559,6 @@ public:
       exit(-1);
     }
 
-
     // Create empty instruction/event libraries.
     inst_lib = emp::NewPtr<inst_lib_t>();
     event_lib = emp::NewPtr<event_lib_t>();
@@ -539,7 +612,7 @@ public:
 
     } else if (PROBLEM == PROBLEM_ID__CHANGING_ENV_WITH_TASKS) {
       CHANGING_ENVIRONMENT = true;
-      score_agent = [this](Agent & agent, size_t i) { return Score__ChgEnvWithTasksProg(agent, i); };
+      score_agent = [this](Agent & agent, size_t i) { return Score__ChgEnvWithTasksProb(agent, i); };
       // Add problem-specific instructions.
       // Add conditional submit instruction.
       inst_lib->AddInst("Load-1", [this](hardware_t & hw, const inst_t & inst) {
@@ -708,17 +781,29 @@ public:
           }
           // Run the hardware for some amount of time.
           for (eval_update = 0; eval_update < EVAL_TIME; ++eval_update) {
-            if (CHANGING_ENVIRONMENT && (env_state == -1 || random->P(ENVIRONMENT_CHG_PROB))) {
-              // Change the environment to a random state!
-              env_state = random->GetUInt(ENVIRONMENT_STATES);
-              // Trigger environment state event.
-              eval_hw->TriggerEvent("EnvSignal", env_state_tags[env_state]);
+            if (CHANGING_ENVIRONMENT) {
+              if (env_state == -1 || random->P(ENVIRONMENT_CHG_PROB)) {
+                // Change the environment to a random state!
+                env_state = random->GetUInt(ENVIRONMENT_STATES);
+                // Trigger environment state event.
+                eval_hw->TriggerEvent("EnvSignal", env_state_tags[env_state]);
+              }
+              // Should we trigger a false/distraction signal?
+              if (ENVIRONMENT_FALSE_SIGNALS && random->P(ENVIRONMENT_FALSE_SIGNAL_PROB)) {
+                const size_t tID = random->GetUInt(ENVIRONMENT_FALSE_SIGNALS);
+                eval_hw->TriggerEvent("EnvSignal", false_env_state_tags[tID]);
+              }
             }
+
             // Run hardware for a time step.
             eval_hw->SingleProcess();
             // Does hardware state match environment state?
             if (eval_hw->GetTrait(TRAIT_ID__STATE) == env_state) {
               agent.env_matches_by_trial[trialID] += 1;
+            }
+            if (!CHANGING_ENVIRONMENT && unique_tasks_credited == TASK_CNT) {
+              eval_update = EVAL_TIME;
+              break;
             }
           }
           // Update agent's task completion info.
@@ -763,7 +848,7 @@ public:
         program_t analyze_prog(inst_lib);
         std::ifstream analyze_fstream(ANALYZE_AGENT_FPATH);
         if (!analyze_fstream.is_open()) {
-          std::cout << "Failed to open analysis program file(" << ANCESTOR_FPATH << "). Exiting..." << std::endl;
+          std::cout << "Failed to open analysis program file(" << ANALYZE_AGENT_FPATH << "). Exiting..." << std::endl;
           exit(-1);
         }
         analyze_prog.Load(analyze_fstream);
@@ -801,13 +886,21 @@ public:
           // Run the hardware for some amount of time.
           for (eval_update = 0; eval_update < EVAL_TIME; ++eval_update) {
             std::cout << "================= TIME: " << eval_update << " =================" << std::endl;
-            if (CHANGING_ENVIRONMENT && (env_state == -1 || random->P(ENVIRONMENT_CHG_PROB))) {
-              std::cout << "  ENV CHG: " << env_state << " --> ";
-              // Change the environment to a random state!
-              env_state = random->GetUInt(ENVIRONMENT_STATES);
-              std::cout << env_state << std::endl;
-              // Trigger environment state event.
-              eval_hw->TriggerEvent("EnvSignal", env_state_tags[env_state]);
+            if (CHANGING_ENVIRONMENT) {
+              if (env_state == -1 || random->P(ENVIRONMENT_CHG_PROB)) {
+                std::cout << "  ENV CHG: " << env_state << " --> ";
+                // Change the environment to a random state!
+                env_state = random->GetUInt(ENVIRONMENT_STATES);
+                std::cout << env_state << std::endl;
+                // Trigger environment state event.
+                eval_hw->TriggerEvent("EnvSignal", env_state_tags[env_state]);
+              }
+              // Should we trigger a false/distraction signal?
+              if (ENVIRONMENT_FALSE_SIGNALS && random->P(ENVIRONMENT_FALSE_SIGNAL_PROB)) {
+                const size_t tID = random->GetUInt(ENVIRONMENT_FALSE_SIGNALS);
+                eval_hw->TriggerEvent("EnvSignal", false_env_state_tags[tID]);
+                std::cout << "Distraction signal: "; false_env_state_tags[tID].Print(); std::cout << std::endl;
+              }
             }
             std::cout << "Environment state: " << env_state << std::endl;
             // Run hardware for a time step.
@@ -900,6 +993,7 @@ public:
       task.calc_solutions(a, b);
     }
     load_id = 0;
+    unique_tasks_credited = 0;
     task_inputs[0] = a;
     task_inputs[1] = b;
   }
@@ -1066,12 +1160,17 @@ public:
     return (double)score;
   }
 
-  double Score__ChgEnvWithTasksProg(Agent & agent, size_t trialID) {
+  double Score__ChgEnvWithTasksProb(Agent & agent, size_t trialID) {
     int score = 0;
+    int credits = 0;
     for (size_t i = 0; i < TASK_CNT; ++i) {
-      if (tasks_info[i].credited > 0) score += 1;
+      if (tasks_info[i].completed > 0) score += 1;
+      if (tasks_info[i].credited > 0) {
+        score += 1;
+        credits += 1;
+      }
     }
-    if (score == TASK_CNT) { // If all tasks were completed, when was final task done?
+    if (credits == TASK_CNT) { // If all tasks were completed, when was final task done?
       int all_tasks_update = -1;
       for (size_t i = 0; i < TASK_CNT; ++i) {
         if ((int)tasks_info[i].cred_time_stamps[0] > all_tasks_update)
@@ -1079,6 +1178,7 @@ public:
       }
       score += (EVAL_TIME - all_tasks_update);
     }
+    score += agent.env_matches_by_trial[trialID];
     return (double)score;
   }
 
@@ -1154,6 +1254,7 @@ public:
           task.comp_time_stamps.emplace_back(eval_update);
           task.credited += 1;
           task.cred_time_stamps.emplace_back(eval_update);
+          if (task.credited == 1) unique_tasks_credited += 1;
         }
       }
     }
@@ -1176,6 +1277,7 @@ public:
           if (hw.GetTrait(TRAIT_ID__STATE) == env_state) {
             task.credited += 1;
             task.cred_time_stamps.emplace_back(eval_update);
+            if (task.credited == 1) unique_tasks_credited += 1;
           }
         }
       }
