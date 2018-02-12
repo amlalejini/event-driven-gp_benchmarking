@@ -71,7 +71,7 @@ def main():
                         target_line = line
                         break
                 if target_line:
-                    fu_content = map(lambda x : x.strip(), fu_content)
+                    fu_content = map(lambda x : x.strip(), target_line)
                 else:
                     print "Failed to find fitness @ update %d" % fit_update
                     exit(-1)
