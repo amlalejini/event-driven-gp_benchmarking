@@ -4,7 +4,7 @@
 #PBS -l walltime=00:08:00:00
 #PBS -l feature=intel16
 #PBS -l mem=8gb
-#PBS -t 121-240
+#PBS -t 121-150
 #PBS -N BT25HARDER
 
 ### load necessary modules, e.g.
@@ -31,7 +31,7 @@ PARAM__PER_FUNC__FUNC_DUP_RATE=0.05
 PARAM__PER_FUNC__FUNC_DEL_RATE=0.05
 
 # ES16 FS16 RNDSIG0
-if [ ${PBS_ARRAYID} -ge 121 ] && [ ${PBS_ARRAYID} -le 30 ]
+if [ ${PBS_ARRAYID} -ge 121 ] && [ ${PBS_ARRAYID} -le 150 ]
 then
   PARAM__ENVIRONMENT_STATES=16
   PARAM__ENVIRONMENT_FALSE_SIGNALS=16
