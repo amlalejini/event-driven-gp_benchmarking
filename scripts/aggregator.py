@@ -67,7 +67,7 @@ def main():
                 target_line = None
                 for line in fitness_contents:
                     line = line.split(",")
-                    if (line[header_lu["update"]] == fit_update):
+                    if (line[header_lu["update"]] == str(fit_update)):
                         target_line = line
                         break
                 if target_line:
@@ -75,6 +75,7 @@ def main():
                     fu_content = map(lambda x : x.strip(), fu_content)
                 else:
                     print "Failed to find fitness @ update %d" % fit_update
+                    exit(-1)
             else:
                 # Just use the last line.
                 fu_content = fitness_contents[-1].split(",")
@@ -86,7 +87,7 @@ def main():
             f_content += ",".join([benchmark, run_treat, run_id, final_update, mean_fitness, max_fitness]) + "\n"
         with open(os.path.join(dump, "fitness_%s.csv"), "w") as fp:
             fp.write(f_content)
-            
+
 
     if (args.final_fitness):
         print "\nAggregating final fitness information..."
