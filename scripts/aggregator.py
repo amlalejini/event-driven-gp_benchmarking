@@ -60,7 +60,7 @@ def main():
                 fitness_contents = fp.readlines()
             header = fitness_contents[0].split(",")
             header_lu = {header[i].strip():i for i in range(0, len(header))}
-            fitness_contents = fitness_contents[:-1]
+            fitness_contents = fitness_contents[1:]
             fu_content = []
             if (fit_update != None):
                 # Look for give update.
@@ -71,7 +71,6 @@ def main():
                         target_line = line
                         break
                 if target_line:
-                    fu_content = target_line.split(",")
                     fu_content = map(lambda x : x.strip(), fu_content)
                 else:
                     print "Failed to find fitness @ update %d" % fit_update
