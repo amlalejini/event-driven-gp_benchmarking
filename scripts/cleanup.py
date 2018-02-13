@@ -28,14 +28,10 @@ def main():
             if "pop_" in thing and thing != "pop_%d" % update:
                 cmd = "rm -rf %s" % os.path.join(run_dir, thing)
                 return_code = subprocess.call(cmd, shell=True)
-            if thing == "pattern_matching" or thing == "consensus" or thing == "changing_environment":
+            clean_these = ["pattern_matching", "consensus", "changing_environment", "logic_operations"]
+            if thing in clean_these:
                 cmd = "rm %s" % os.path.join(run_dir, thing)
                 return_code = subprocess.call(cmd, shell=True)
-
-
-
-
-
 
 if __name__ == "__main__":
     main()
