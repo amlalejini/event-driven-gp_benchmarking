@@ -18,7 +18,7 @@
 #include "tools/math.h"
 #include "tools/string_utils.h"
 #include "hardware/EventDrivenGP.h"
-#include "Evo/World.h"
+#include "Evolve/World.h"
 #include "logic_operations-config.h"
 
 // At the moment, only supports 16 bit tags.
@@ -545,7 +545,7 @@ public:
     // exit(-1);
 
     // Make the world.
-    world = emp::NewPtr<world_t>(random, "ChgEnv-World");
+    world = emp::NewPtr<world_t>(random, "LogOp-World");
     world->Reset();
     // Configure the world.
     world->SetWellMixed(true);
@@ -1306,7 +1306,7 @@ int main(int argc, char * argv[]) {
   auto args = emp::cl::ArgManager(argc, argv);
   LogicOperationsConfig config;
   config.Read(config_fname);
-  if (args.ProcessConfigOptions(config, std::cout, config_fname, "changing_environment-config.h") == false) exit(0);
+  if (args.ProcessConfigOptions(config, std::cout, config_fname, "logic_operations-config.h") == false) exit(0);
   if (args.TestUnknown() == false) exit(0);
 
   std::cout << "==============================" << std::endl;
