@@ -9,6 +9,7 @@
 #include <sys/stat.h>
 #include <algorithm>
 #include <functional>
+#include <cmath>
 
 #include "base/Ptr.h"
 #include "base/vector.h"
@@ -36,6 +37,7 @@
 //  [ ] Support Othello
 //     - Add base game struct with common interface for different games: MancalaGame, OthelloGame
 //  [ ] Support human v AI analysis mode.
+//  [ ] Systematically test stuff.
 
 constexpr size_t TAG_WIDTH = 16;
 
@@ -46,6 +48,12 @@ constexpr size_t TRAIT_ID__PLAYER_ID = 2;
 // Problem IDs
 constexpr size_t PROBLEM_ID__MANCALA = 0;
 constexpr size_t PROBLEM_ID__OTHELLO = 1;
+
+// Fitness methods IDs.
+constexpr size_t FITNESS_CALC_ID__MIN = 0;
+constexpr size_t FITNESS_CALC_ID__MAX = 1;
+constexpr size_t FITNESS_CALC_ID__MEDIAN = 2;
+constexpr size_t FITNESS_CALC_ID__AVG = 3;
 
 //
 constexpr size_t MANCALA__GET_MOVE_METHOD_ID__WM = 0; ///< Look at working memory specified by submit instruction.
@@ -68,18 +76,18 @@ public:
   /// Struct to keep track of game-playing agent.
   struct Agent {
     program_t program;
-    double score;
+    emp::vector<double> scores_by_trial;
 
     Agent(const program_t & _p)
-      : program(_p), score(0)
+      : program(_p), scores_by_trial()
     { ; }
 
     Agent(const Agent && in)
-      : program(in.program), score(in.score)
+      : program(in.program), scores_by_trial(in.scores_by_trial)
     { ; }
 
     Agent(const Agent & in)
-      : program(in.program), score(in.score)
+      : program(in.program), scores_by_trial(in.scores_by_trial)
     { ; }
 
     program_t & GetGenome() { return program; }
@@ -149,19 +157,41 @@ protected:
   emp::Ptr<hardware_t> eval_hw;
   emp::Ptr<hardware_t> opp_hw;
 
+  // TODO: edits to mancala to better support other player types.
   struct MancalaGame {
-    using mancala_ai_t = std::function<size_t(emp::Mancala & game)>;
+    using mancala_ai_t = std::function<size_t(emp::Mancala & game, bool)>;
     emp::Mancala mancala_game;
+
     std::function<size_t(const hardware_t &)> get_move;
-    std::function<void(hardware_t &, const memory_t &)> reset_hw;
+    std::function<bool(const hardware_t &)> get_done;
+    std::function<void(hardware_t &, const memory_t &)> begin_turn;
+    std::function<void(hardware_t &, size_t)> begin_game;
+
     size_t move_eval_time;
     bool verbose;
     size_t start_player;
 
+    struct GameStats {
+      size_t rounds;
+      double p0_score; ///< Our hero's score.
+      double p1_score; ///< Opponent score.
+      size_t p0_errors;
+      size_t p1_errors;
+
+      GameStats()
+        : rounds(0), p0_score(0.0), p1_score(0.0), p0_errors(0), p1_errors(0)
+      { ; }
+
+      void Reset() {
+        rounds = 0; p0_score = 0; p1_score = 0;
+        p0_errors = 0; p1_errors = 0;
+      }
+    } stats;
+
 
     MancalaGame()
-      : mancala_game(), get_move(), reset_hw(), move_eval_time(512),
-        verbose(false), start_player(0)
+      : mancala_game(), get_move(), get_done(), begin_turn(), begin_game(),
+        move_eval_time(512), verbose(false), start_player(0), stats()
     { ; }
 
     emp::Mancala & GetCurGame() { return mancala_game; }
@@ -171,18 +201,19 @@ protected:
 
     void SetMoveEvalTime(size_t t) { move_eval_time = t; }
 
-    /// Based on Mancala example in Empirical library (originally written by Charles Ofria)
+    /// Based on Mancala example in Empirical library (originally written by Charles Ofria).
     double EvalMancala(mancala_ai_t & player0, mancala_ai_t & player1) {
       size_t cur_player = start_player;
       mancala_game.Reset(cur_player==0);
-      size_t rnd = 0, errors = 0;
+      stats.Reset();
       while (mancala_game.IsDone() == false) {
         // Determine the current player and their move.
         auto & play_fun = (cur_player == 0) ? player0 : player1;
-        size_t best_move = play_fun(mancala_game);
+        bool promise_validity = (cur_player == 0) ? false : true;
+        size_t best_move = play_fun(mancala_game, promise_validity);
 
         if (verbose) {
-          std::cout << "round = " << rnd++ << "   errors = " << errors << std::endl;
+          std::cout << "round = " << stats.rounds << "   errors = " << stats.p0_errors << std::endl;
           mancala_game.Print();
           char move_sym = (char) ('A' + best_move);
           std::cout << "Move = " << move_sym;
@@ -194,13 +225,18 @@ protected:
 
         // If the chosen move is illegal, shift through other options.
         while (!mancala_game.IsMoveValid(best_move)) {
-          if (cur_player == 0) errors++;
+          if (cur_player == 0) {
+            stats.p0_errors++;
+          } else {
+            stats.p1_errors++;
+          }
           if (++best_move > 5) best_move = 0;
         }
 
         // Do the move and determine who goes next.
         bool go_again = mancala_game.DoMove(cur_player, best_move);
         if (!go_again) cur_player = !cur_player;
+        stats.rounds++;
       }
 
       if (verbose) {
@@ -208,27 +244,39 @@ protected:
                   << "   B: " << mancala_game.ScoreB()
         << std::endl;
       }
-      return ((double)mancala_game.ScoreA()) - ((double)mancala_game.ScoreB()) - ((double)errors*10.0);
+
+      stats.p0_score = mancala_game.ScoreA();
+      stats.p1_score = mancala_game.ScoreB();
+
+      return ((double)mancala_game.ScoreA()) - ((double)mancala_game.ScoreB());
     }
 
     /// Based on Mancala example in Empirical library (originally written by Charles Ofria)
     double EvalMancala(hardware_t & hw0, hardware_t & hw1) {
-      hw0.SetTrait(TRAIT_ID__PLAYER_ID, 0);
-      hw1.SetTrait(TRAIT_ID__PLAYER_ID, 1);
-      mancala_ai_t agent0_fun = [&hw0, this](emp::Mancala & game){ return this->EvalMancalaMove(game, hw0); };
-      mancala_ai_t agent1_fun = [&hw1, this](emp::Mancala & game){ return this->EvalMancalaMove(game, hw1); };
+      begin_game(hw0, 0);
+      begin_game(hw1, 1);
+      mancala_ai_t agent0_fun = [&hw0, this](emp::Mancala & game, bool promise_validity=false){ return this->EvalMancalaMove(game, hw0, promise_validity); };
+      mancala_ai_t agent1_fun = [&hw1, this](emp::Mancala & game, bool promise_validity=false){ return this->EvalMancalaMove(game, hw1, promise_validity); };
       return EvalMancala(agent0_fun, agent1_fun);
     }
 
-    size_t EvalMancalaMove(emp::Mancala & game, hardware_t & hw) {
+    size_t EvalMancalaMove(emp::Mancala & game, hardware_t & hw, bool promise_validity=false) {
       // Reset hardware.
-      reset_hw(hw, game.AsInput(game.GetCurPlayer()));
-
+      begin_turn(hw, game.AsInput(game.GetCurPlayer()));
       // Run code until time runs out or until move has been set.
-      for (size_t i = 0; i < move_eval_time && !hw.GetTrait(TRAIT_ID__DONE); ++i) {
+      for (size_t i = 0; i < move_eval_time && get_done(hw); ++i) {
         hw.SingleProcess();
       }
-      return get_move(hw);
+      size_t move = get_move(hw);
+
+      // Did we promise to give a valid move?
+      if (promise_validity) {
+        // If the chosen move is illegal, shift through other options.
+        while (!mancala_game.IsMoveValid(move)) {
+          if (++move > 5) move = 0;
+        }
+      }
+      return move;
     }
   };
 
@@ -249,13 +297,15 @@ protected:
       double p0_score;
       double p1_score;
       bool finished_game;
+      size_t focal_playerID;
 
       GameStats()
-        : rounds(0), p0_score(0.0), p1_score(0.0), finished_game(false)
+        : rounds(0), p0_score(0.0), p1_score(0.0), finished_game(false), focal_playerID(0)
       { ; }
 
       void Reset() {
         rounds = 0; p0_score = 0; p1_score = 0; finished_game = false;
+        focal_playerID = 0;
       }
     } stats;
 
@@ -275,6 +325,7 @@ protected:
     double EvalOthello(othello_ai_t & player0, othello_ai_t & player1, bool focal_player0=true) {
       othello_game.Reset();
       stats.Reset();
+      stats.focal_playerID = (focal_player0) ? 0 : 1;
       size_t player = 0;
       while (!othello_game.IsOver()) {
         player = othello_game.GetCurPlayer();
@@ -319,10 +370,7 @@ protected:
 
     // double EvalMancala(hardware_t & hw0, hardware_t & hw1) {
     double EvalOthello(hardware_t & hw0, hardware_t & hw1, bool focal_player0=true) {
-      // -> begin_game(hw0, hw1)
       // DarkPlayer is always player0
-      // hw0.SetTrait(TRAIT_ID__PLAYER_ID, emp::Othello::DarkPlayerID());
-      // hw1.SetTrait(TRAIT_ID__PLAYER_ID, emp::Othello::LightPlayerID());
       begin_game(hw0, 0);
       begin_game(hw1, 1);
       othello_ai_t agent0_fun = [&hw0, this](emp::Othello & game, bool promise_validity) { return EvalOthelloMove(game, hw0, promise_validity); };
@@ -365,7 +413,7 @@ protected:
           for (size_t i = 0; i < valid_moves.size(); ++i) {
             const size_t proposed_x = othello_game.GetPosX(valid_moves[i]);
             const size_t proposed_y = othello_game.GetPosY(valid_moves[i]);
-            const size_t proposed_dist = emp::Pow2(proposed_x - move_x) + emp::Pow2(proposed_y - move_y);
+            const size_t proposed_dist = std::pow(proposed_x - move_x, 2) + std::pow(proposed_y - move_y, 2);
             if (proposed_dist < sq_move_dist) {
               new_move_x = proposed_x; new_move_y = proposed_y; sq_move_dist = proposed_dist;
             }
@@ -391,6 +439,7 @@ protected:
   };
 
   std::function<double(hardware_t &, hardware_t &)> eval_game;
+  std::function<double(void)> calc_score; ///< Calculate eval agent's score based on CURRENT game state.
 
   MancalaGame mancala;
   OthelloGame othello;
@@ -398,7 +447,7 @@ protected:
 
 public:
   GamesExp(const GamesConfig & config)
-    : eval_game(), mancala(), othello(4)
+    : eval_game(), calc_score(), mancala(), othello(4)
   {
     // Fill out experiment parameters with config settings.
     DEBUG_MODE = config.DEBUG_MODE();
@@ -454,7 +503,20 @@ public:
     // Configure the world.
     world->SetWellMixed(true);
     world->SetMutFun([this](Agent & agent, emp::Random & rnd) { return this->Mutate(agent, rnd); });
-    world->SetFitFun([this](Agent & agent) { return this->CalcFitness__MANCALA(agent); });
+
+    if (FITNESS_CALC_TYPE == FITNESS_CALC_ID__MIN) {
+      world->SetFitFun([this](Agent & agent) { return this->CalcFitness__MIN(agent); });
+    } else if (FITNESS_CALC_TYPE == FITNESS_CALC_ID__MAX) {
+      world->SetFitFun([this](Agent & agent) { return this->CalcFitness__MAX(agent); });
+    } else if (FITNESS_CALC_TYPE == FITNESS_CALC_ID__MEDIAN) {
+      world->SetFitFun([this](Agent & agent) { return this->CalcFitness__MEDIAN(agent); });
+    } else if (FITNESS_CALC_TYPE == FITNESS_CALC_ID__AVG) {
+      world->SetFitFun([this](Agent & agent) { return this->CalcFitness__AVG(agent); });
+    } else {
+      std::cout << "Unrecognized fitness calculation type. Exiting..." << std::endl;
+      exit(-1);
+    }
+
 
     // Configure instruction/event libraries.
     inst_lib = emp::NewPtr<inst_lib_t>();
@@ -495,13 +557,27 @@ public:
       // How much time (max) do we give for evaluations?
       mancala.SetMoveEvalTime(EVAL_TIME);
 
+      // TODO: setup a variety of calc_score functions options.
+      calc_score = [this]() {
+        return this->mancala.stats.p0_score - this->mancala.stats.p1_score - ((double)this->mancala.stats.p0_errors*10);
+      };
+
       // Setup game evaluation function.
       eval_game = [this](hardware_t & hw0, hardware_t & hw1) {
-        return this->mancala.EvalMancala(hw0, hw1);
+        mancala.SetStartPlayer((size_t)this->random->P(0.5));
+        this->mancala.EvalMancala(hw0, hw1);
+        return calc_score();
       };
 
       // How do we extract a move?
       mancala.get_move = [this](const hardware_t & hw) { return hw.GetTrait(TRAIT_ID__MOVE); };
+
+      mancala.get_done = [this](const hardware_t & hw) { return (bool)hw.GetTrait(TRAIT_ID__DONE); };
+
+      mancala.begin_game = [this](hardware_t & hw, size_t playerID) {
+        this->ResetHW(hw);
+        hw.SetTrait(TRAIT_ID__PLAYER_ID, playerID);
+      };
 
       // Mancala-specific instructions.
 
@@ -551,7 +627,7 @@ public:
       }
 
       if (!RESET_HW_BETWEEN_MOVES) {
-        mancala.reset_hw = [this](hardware_t & hw, const memory_t & main_in_mem=memory_t()) {
+        mancala.begin_turn = [this](hardware_t & hw, const memory_t & main_in_mem=memory_t()) {
           hw.SetTrait(TRAIT_ID__DONE, 0);
         };
         inst_lib->AddInst("SenseBoard", [this](hardware_t & hw, const inst_t & inst) {
@@ -560,7 +636,7 @@ public:
           for (auto mem : board) { state.SetInput(mem.first, mem.second); }
         }, 0, "Load board into input buffer.");
       } else {
-        mancala.reset_hw = [this](hardware_t & hw, const memory_t & main_in_mem=memory_t()) {
+        mancala.begin_turn = [this](hardware_t & hw, const memory_t & main_in_mem=memory_t()) {
           this->ResetHW(hw, main_in_mem);
           hw.SetTrait(TRAIT_ID__PLAYER_ID, this->mancala.GetCurGame().GetCurPlayer());
         };
@@ -568,10 +644,44 @@ public:
 
     } else if (PROBLEM == PROBLEM_ID__OTHELLO) {
       othello = OthelloGame(OTHELLO__BOARD_SIZE);
-      std::cout << "Othello board size: " << othello.othello_game.GetBoard().size() << std::endl;
-      // Othello todos:
+      othello.SetMoveEvalTime(EVAL_TIME);
+
+      // TODO: scoring functions.
+      calc_score = [this](){
+        // 1) #rounds w/out a mistake
+        // 2) bonus for finishing game
+        // 3) bonus for winning.
+        double score = this->othello.stats.rounds;
+        // If they finished the game...
+        if (this->othello.stats.finished_game) {
+          size_t max_rounds = this->othello.GetCurGame().GetBoard().size();
+          score = max_rounds;
+          double hero_score = 0;
+          double opp_score = 0;
+          if (this->othello.stats.focal_playerID == 0) {
+            hero_score = this->othello.stats.p0_score;
+            opp_score = this->othello.stats.p1_score;
+          } else {
+            hero_score = this->othello.stats.p1_score;
+            opp_score = this->othello.stats.p0_score;
+          }
+          // Get bonus for winning.
+          score += (hero_score - opp_score);
+          // Get bonus for how quickly you finished the game if you won.
+          if (hero_score > opp_score) {
+            score += max_rounds - this->othello.stats.rounds;
+          }
+        }
+        return score;
+      };
+
       eval_game = [this](hardware_t & hw0, hardware_t & hw1) {
-        return this->othello.EvalOthello(hw0, hw1);
+        if ((size_t)this->random->P(0.5)) {
+          this->othello.EvalOthello(hw0, hw1, true);
+        } else {
+          this->othello.EvalOthello(hw1, hw0, false);
+        }
+        return this->calc_score();
       };
       // Othello game interface requires:
       //  - get_move
@@ -590,6 +700,8 @@ public:
         hw.SetTrait(TRAIT_ID__PLAYER_ID, playerID);
       };
 
+      // TODO: configure othello-specific hardware.
+
     } else {
       std::cout << "Unrecognized PROBLEM. Exiting..." << std::endl;
       exit(-1);
@@ -600,6 +712,7 @@ public:
     eval_hw->SetMinBindThresh(HW_MIN_BIND_THRESH);
     eval_hw->SetMaxCores(HW_MAX_CORES);
     eval_hw->SetMaxCallDepth(HW_MAX_CALL_DEPTH);
+
     opp_hw = emp::NewPtr<hardware_t>(inst_lib, event_lib, random);
     opp_hw->SetMinBindThresh(HW_MIN_BIND_THRESH);
     opp_hw->SetMaxCores(HW_MAX_CORES);
@@ -689,9 +802,10 @@ public:
         Agent & opponent = world->GetRandomOrg();
         LoadOppHWProgram(opponent.GetGenome());
         // Who makes the first move?
-        mancala.SetStartPlayer((size_t)random->P(0.5));
-        // Evaluate game.
-        our_hero.score = eval_game(*eval_hw, *opp_hw);
+        for (size_t trialID = 0; trialID < TRIAL_CNT; ++trialID) {
+          // Evaluate game.
+          our_hero.scores_by_trial.emplace_back(eval_game(*eval_hw, *opp_hw));
+        }
         double fitness = world->CalcFitnessOrg(our_hero);
         // std::cout << "  Score: " << fitness << std::endl;
         if (fitness > best_score) { best_score = fitness; }
@@ -839,8 +953,38 @@ public:
     return mut_cnt;
   }
 
-  double CalcFitness__MANCALA(Agent & agent) {
-    return agent.score;
+  double CalcFitness__MIN(Agent & agent) {
+    if (!agent.scores_by_trial.size()) return 0.0;
+    double val = agent.scores_by_trial[0];
+    for (size_t i = 0; i < agent.scores_by_trial.size(); ++i) {
+      if (agent.scores_by_trial[i] < val) val = agent.scores_by_trial[i];
+    }
+    return val;
+  }
+
+  double CalcFitness__MEDIAN(Agent & agent) {
+    if (!agent.scores_by_trial.size()) return 0.0;
+    // Sort scores by trial.
+    std::sort(agent.scores_by_trial.begin(), agent.scores_by_trial.end());
+    return agent.scores_by_trial[(size_t)(agent.scores_by_trial.size() / 2)];
+  }
+
+  double CalcFitness__AVG(Agent & agent) {
+    if (!agent.scores_by_trial.size()) return 0.0;
+    double val = 0.0;
+    for (size_t i = 0; i < agent.scores_by_trial.size(); ++i) {
+      val += agent.scores_by_trial[i];
+    }
+    return val / agent.scores_by_trial.size();
+  }
+
+  double CalcFitness__MAX(Agent & agent) {
+    if (!agent.scores_by_trial.size()) return 0.0;
+    double val = agent.scores_by_trial[0];
+    for (size_t i = 0; i < agent.scores_by_trial.size(); ++i) {
+      if (agent.scores_by_trial[i] > val) val = agent.scores_by_trial[i];
+    }
+    return val;
   }
 
   /// This function takes a snapshot of the world.
