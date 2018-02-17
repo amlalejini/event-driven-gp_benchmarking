@@ -38,12 +38,16 @@
 //     - Add base game struct with common interface for different games: MancalaGame, OthelloGame
 //  [ ] Support human v AI analysis mode.
 //  [ ] Systematically test stuff.
+//  [ ] Refactor -- cleanup
+//  [ ] Switch to signals where currently using functors.
+//  [ ] TODO - caching on the othello side of things.
 
 constexpr size_t TAG_WIDTH = 16;
 
 constexpr size_t TRAIT_ID__MOVE = 0;
 constexpr size_t TRAIT_ID__DONE = 1;
 constexpr size_t TRAIT_ID__PLAYER_ID = 2;
+// constexpr size_t TRAIT_ID__ACTIVE_HW_SUPPLEMENT = 3;
 
 // Problem IDs
 constexpr size_t PROBLEM_ID__MANCALA = 0;
@@ -58,6 +62,11 @@ constexpr size_t FITNESS_CALC_ID__AVG = 3;
 //
 constexpr size_t MANCALA__GET_MOVE_METHOD_ID__WM = 0; ///< Look at working memory specified by submit instruction.
 constexpr size_t MANCALA__GET_MOVE_METHOD_ID__OM = 1; ///< Look at output memory buffer (0:5, max val's index is move)
+
+// Othello-specific variables.
+constexpr size_t OTHELLO__MAX_PLAYER_CNT = 2;
+
+constexpr bool DEBUGGING = false;
 
 /// Class to contain everything relevant to running games benchmarks w/SignalGP.
 class GamesExp {
@@ -114,6 +123,7 @@ protected:
 
   // Othello parameters.
   size_t OTHELLO__BOARD_SIZE;
+  size_t OTHELLO__HW_BOARDS;
 
   // Hardware parameters.
   size_t HW_MAX_CORES;
@@ -264,7 +274,7 @@ protected:
       // Reset hardware.
       begin_turn(hw, game.AsInput(game.GetCurPlayer()));
       // Run code until time runs out or until move has been set.
-      for (size_t i = 0; i < move_eval_time && get_done(hw); ++i) {
+      for (size_t i = 0; i < move_eval_time && !get_done(hw); ++i) {
         hw.SingleProcess();
       }
       size_t move = get_move(hw);
@@ -378,7 +388,24 @@ protected:
       return EvalOthello(agent0_fun, agent1_fun, focal_player0);
     }
 
+    double EvalOthello_RANDOTHELLO(hardware_t & hw0, emp::Random & rnd, bool hw_first=true) {
+      begin_game(hw0, (size_t)!hw_first);
+      if (DEBUGGING) std::cout << "HW dark? " << hw_first << std::endl;
+      othello_ai_t agent0_fun = [&hw0, this](emp::Othello & game, bool promise_validity) { return this->EvalOthelloMove(game, hw0, promise_validity); };
+      othello_ai_t rando_fun = [hw_first, &rnd, this](emp::Othello & game, bool promise_validity) { return this->RandoThelloMove(game, rnd, (size_t)hw_first, promise_validity); };
+      if (hw_first) {
+        return EvalOthello(agent0_fun, rando_fun, true);
+      } else {
+        return EvalOthello(rando_fun, agent0_fun, false);
+      }
+    }
+
     // TODO: add more EvalOthello interface options --> more AI types.. a few heuristics... human player... etc..
+    size_t RandoThelloMove(emp::Othello & game, emp::Random & rnd, size_t playerID, bool promise_validity=true) {
+      // Get list of valid moves.
+      emp::vector<size_t> options = othello_game.GetMoveOptions(playerID);
+      return options[rnd.GetUInt(0, options.size())];
+    }
 
     // Eval move on given hardware and on given game board state.
     size_t EvalOthelloMove(emp::Othello & game, hardware_t & hw, bool promise_validity=false) {
@@ -391,9 +418,11 @@ protected:
       // ----
       // Reset hardware as appropriate.
       begin_turn(hw);
+      if (verbose) hw.PrintState();
       // Run code until time runs out or until move has been set.
-      for (size_t i = 0; i < move_eval_time && get_done(hw); ++i) {
+      for (size_t i = 0; i < move_eval_time && !get_done(hw); ++i) {
         hw.SingleProcess();
+        if (verbose) hw.PrintState();
       }
       size_t move = get_move(hw);
 
@@ -423,31 +452,121 @@ protected:
       }
       return move;
     }
-
-    // Agent-board interaction wrappers.
-    int GetBoardValue(size_t playerID, size_t x, size_t y) {
-      return GetBoardValue(playerID, othello_game.GetPosID(x, y));
-    }
-
-    int GetBoardValue(size_t playerID, size_t posID) {
-      int owner = othello_game.GetPosOwner(posID);
-      if (owner == playerID) return 1;
-      else if (owner == othello_game.GetOpponentID(playerID)) return -1;
-      else return 0;
-    }
-
   };
 
   std::function<double(hardware_t &, hardware_t &)> eval_game;
+  std::function<double(hardware_t &, size_t opp_type_id)> eval_game_ai;
   std::function<double(void)> calc_score; ///< Calculate eval agent's score based on CURRENT game state.
 
   MancalaGame mancala;
   OthelloGame othello;
 
+  /// HW supplement used by SGP hardware to perceive/manipulate Othello game board.
+  /// Things to include:
+  ///   - Set of othello game modules.
+  ///   - Reset function.
+  struct OthelloHWSupplement {
+
+    struct OthelloModule {
+      emp::Othello othello_game;
+
+      OthelloModule(size_t _board_size)
+        : othello_game(_board_size)
+      { ; }
+
+      OthelloModule(const OthelloModule & in)
+        : othello_game(in.othello_game)
+      { ; }
+
+      OthelloModule(OthelloModule && in)
+        : othello_game(in.othello_game)
+      { ; }
+
+      emp::Othello & GetGame() { return othello_game; }
+
+      size_t GetValidMoveCnt(size_t playerID) {
+        return othello_game.GetMoveOptions(playerID).size();
+      }
+
+      // Agent-board interaction wrappers.
+      int GetBoardValue(size_t playerID, size_t x, size_t y) {
+        return GetBoardValue(playerID, othello_game.GetPosID(x, y));
+      }
+
+      int GetBoardValue(size_t playerID, size_t posID) {
+        int owner = othello_game.GetPosOwner(posID);
+        if (owner == playerID) return 1;
+        else if (owner == othello_game.GetOpponentID(playerID)) return -1;
+        else return 0;
+      }
+
+      // TODO: resets.
+      void Reset() {
+        // Reset othello game.
+        othello_game.Reset();
+      }
+
+      void Reset(const emp::Othello & other) {
+        // Reset everything.
+        Reset();
+        // Copy other's board into othello_game.
+        othello_game.SetBoard(other.GetBoard());
+      }
+
+    };
+
+    emp::vector<OthelloModule> modules; ///< Othello modules.
+    size_t playerID;
+    size_t active_module;
+
+    OthelloHWSupplement(size_t board_size, size_t module_cnt)
+      : modules(), playerID(0), active_module(0)
+    {
+      emp_assert(module_cnt > 0);
+      for (size_t i = 0; i < module_cnt; ++i) modules.emplace_back(board_size);
+    }
+
+    OthelloModule & GetActiveModule() { return modules[active_module]; }
+    size_t GetModuleCnt() { return modules.size(); }
+
+    emp::Othello & GetGame() { return modules[active_module].GetGame(); }
+
+    size_t GetValidMoveCnt() {
+      return modules[active_module].GetValidMoveCnt(playerID);
+    }
+
+    size_t GetValidOppMoveCnt() {
+      const size_t opp_id = modules[active_module].GetGame().GetOpponentID(playerID);
+      return modules[active_module].GetValidMoveCnt(opp_id);
+    }
+
+    int GetBoardValue(size_t x, size_t y) {
+      return modules[active_module].GetBoardValue(playerID, x, y);
+    }
+
+    void SetPlayerID(size_t id) { playerID = id; }
+
+    void SetActiveModule(size_t id) {
+      emp_assert(id < modules.size());
+      active_module = id;
+    }
+
+    void Reset() {
+      for (size_t i = 0; i < modules.size(); ++i) modules[i].Reset();
+    }
+
+    void Reset(const emp::Othello & other) {
+      for (size_t i = 0; i < modules.size(); ++i) modules[i].Reset(other);
+    }
+
+  };
+
+  emp::vector<OthelloHWSupplement> othello_hw_supplements;
 
 public:
   GamesExp(const GamesConfig & config)
-    : eval_game(), calc_score(), mancala(), othello(4)
+    : eval_game(), calc_score(), mancala(), othello(4),
+      othello_hw_supplements()
   {
     // Fill out experiment parameters with config settings.
     DEBUG_MODE = config.DEBUG_MODE();
@@ -462,6 +581,7 @@ public:
     RESET_HW_BETWEEN_MOVES = config.RESET_HW_BETWEEN_MOVES();
     MANCALA__GET_MOVE_METHOD = config.MANCALA__GET_MOVE_METHOD();
     OTHELLO__BOARD_SIZE = config.OTHELLO__BOARD_SIZE();
+    OTHELLO__HW_BOARDS = config.OTHELLO__HW_BOARDS();
     HW_MAX_CORES = config.HW_MAX_CORES();
     HW_MAX_CALL_DEPTH = config.HW_MAX_CALL_DEPTH();
     HW_MIN_BIND_THRESH = config.HW_MIN_BIND_THRESH();
@@ -646,6 +766,11 @@ public:
       othello = OthelloGame(OTHELLO__BOARD_SIZE);
       othello.SetMoveEvalTime(EVAL_TIME);
 
+      // Setup hardware supplements. (2 players = 2 supplements)
+      for (size_t i = 0; i < OTHELLO__MAX_PLAYER_CNT; ++i) {
+        othello_hw_supplements.emplace_back(OTHELLO__BOARD_SIZE, OTHELLO__HW_BOARDS);
+      }
+
       // TODO: scoring functions.
       calc_score = [this](){
         // 1) #rounds w/out a mistake
@@ -675,32 +800,203 @@ public:
         return score;
       };
 
+      // Othello game interface requires:
+      //  - get_move
+      othello.get_move = [this](const hardware_t & hw) { return hw.GetTrait(TRAIT_ID__MOVE); };
+      //  - get_done
+      othello.get_done = [this](const hardware_t & hw) {
+        // HACK:
+        // std::cout << "--- HW BOARD ---" << std::endl;
+        // this->othello_hw_supplements[hw.GetTrait(TRAIT_ID__PLAYER_ID)].GetGame().Print();
+        // std::cout << "----------------" << std::endl;
+        /////////
+        return (bool)hw.GetTrait(TRAIT_ID__DONE);
+      };
+      //  - begin_turn
+      // Currently only supporting reset between turns...
+      othello.begin_turn = [this](hardware_t & hw) {
+        this->ResetHW(hw);
+        const size_t playerID = this->othello.GetCurGame().GetCurPlayer();
+        hw.SetTrait(TRAIT_ID__PLAYER_ID, playerID);
+        // Reset supplementary modules. (w/reference board)
+        this->othello_hw_supplements[playerID].Reset(this->othello.GetCurGame());
+      };
+      //  - begin_game
+      othello.begin_game = [this](hardware_t & hw, size_t playerID) {
+        this->ResetHW(hw);
+        hw.SetTrait(TRAIT_ID__PLAYER_ID, playerID);
+        // Reset supplementary modules. (w/no reference board)
+        this->othello_hw_supplements[playerID].Reset();
+      };
+
+      // TODO - ensure hardware supplements get cleaned up when appropriate.
+      // Othello-specific instructions.
+      // --- ID-driven ---
+      // - SetMoveID
+      // - GetMoveID
+      // --- XY-driven ---
+      // - SetMoveXY
+      inst_lib->AddInst("SetMoveXY", [this](hardware_t & hw, const inst_t & inst) {
+          state_t & state = hw.GetCurState();
+          const size_t move_x = state.GetLocal(inst.args[0]);
+          const size_t move_y = state.GetLocal(inst.args[1]);
+          const size_t move = this->othello.GetCurGame().GetPosID(move_x, move_y);
+          hw.SetTrait(TRAIT_ID__MOVE, move);
+      }, 2, "Trait[MOVE]=GetPosID(WM[arg1], WM[arg2])");
+      // - GetMoveXY
+      inst_lib->AddInst("GetMoveXY", [this](hardware_t & hw, const inst_t & inst) {
+        state_t & state = hw.GetCurState();
+        const size_t move = hw.GetTrait(TRAIT_ID__MOVE);
+        const size_t move_x = this->othello.GetCurGame().GetPosX(move);
+        const size_t move_y = this->othello.GetCurGame().GetPosY(move);
+        state.SetLocal(inst.args[0], move_x);
+        state.SetLocal(inst.args[1], move_y);
+      }, 2, "WM[ARG1]=Trait[MOVE].x; WM[ARG2]=Trait[MOVE].y;");
+      // - IsValidXY          -> Is arg-specifiec move valid? (with respect to true board)
+      inst_lib->AddInst("IsValidXY", [this](hardware_t & hw, const inst_t & inst) {
+        state_t & state = hw.GetCurState();
+        const size_t move_x = state.GetLocal(inst.args[0]);
+        const size_t move_y = state.GetLocal(inst.args[1]);
+        state.SetLocal(inst.args[2], (int)this->othello.GetCurGame().IsMoveValid(hw.GetTrait(TRAIT_ID__PLAYER_ID), move_x, move_y));
+      }, 3, "WM[ARG3] = IsValid(x,y)");
+      // - AdjustDirXY
+      inst_lib->AddInst("AdjacentXY", [this](hardware_t & hw, const inst_t & inst) {
+        state_t & state = hw.GetCurState();
+        const size_t move_x = state.GetLocal(inst.args[0]);
+        const size_t move_y = state.GetLocal(inst.args[1]);
+        const size_t dir = emp::Mod((int)state.GetLocal(inst.args[2]), 8);
+        const int nID = this->othello.GetCurGame().GetNeighbor(move_x, move_y, dir);
+        if (nID == -1) {
+          state.SetLocal(inst.args[0], -1);
+          state.SetLocal(inst.args[1], -1);
+        } else {
+          state.SetLocal(inst.args[0], this->othello.GetCurGame().GetPosX(nID));
+          state.SetLocal(inst.args[1], this->othello.GetCurGame().GetPosY(nID));
+        }
+      }, 3, "Adjust(WM[ARG1].x), Adjust(WM[ARG2].y) in direction specified by WM[ARG3]");
+      // - ValidMovesCnt-HW    -> How many valid moves available (with respect to active hw board)
+      inst_lib->AddInst("ValidMovesCnt-HW", [this](hardware_t & hw, const inst_t & inst) {
+        state_t & state = hw.GetCurState();
+        size_t playerID = hw.GetTrait(TRAIT_ID__PLAYER_ID);
+        state.SetLocal(inst.args[0], this->othello_hw_supplements[playerID].GetValidMoveCnt());
+      }, 1, "WM[ARG1] = ValidMoves(Active HW Board)");
+      // - ValidOppMovesCnt-HW -> How many valid moves available to opponent (with respect to active hw board)
+      inst_lib->AddInst("ValidOppMovesCnt-HW", [this](hardware_t & hw, const inst_t & inst) {
+        state_t & state = hw.GetCurState();
+        size_t playerID = hw.GetTrait(TRAIT_ID__PLAYER_ID);
+        state.SetLocal(inst.args[0], this->othello_hw_supplements[playerID].GetValidOppMoveCnt());
+      }, 1, "WM[ARG1] = Opponent's valid move count");
+      // - GetBoardValueXY-HW  -> What's at XY?
+      inst_lib->AddInst("GetBoardValue-HW", [this](hardware_t & hw, const inst_t & inst) {
+        state_t & state = hw.GetCurState();
+        const size_t move_x = state.GetLocal(inst.args[0]);
+        const size_t move_y = state.GetLocal(inst.args[1]);
+        const size_t playerID = hw.GetTrait(TRAIT_ID__PLAYER_ID);
+        // If inputs are garbage, do nothing.
+        if (this->othello.GetCurGame().IsValidPos(move_x, move_y)) {
+          state.SetLocal(inst.args[2], this->othello_hw_supplements[playerID].GetBoardValue(move_x, move_y));
+        } else {
+          state.SetLocal(inst.args[2], -2);
+        }
+      }, 3, "WM[ARG3] = Owner @ WM[ARG1],WM[ARG2]");
+      // - PlaceXY-HW          -> Place own marker (if valid) @ XY on module board.
+      inst_lib->AddInst("PlaceXY-HW", [this](hardware_t & hw, const inst_t & inst) {
+        state_t & state = hw.GetCurState();
+        const size_t move_x = state.GetLocal(inst.args[0]);
+        const size_t move_y = state.GetLocal(inst.args[1]);
+        const size_t playerID = hw.GetTrait(TRAIT_ID__PLAYER_ID);
+        if (this->othello_hw_supplements[playerID].GetGame().IsMoveValid(playerID, move_x, move_y)) {
+          this->othello_hw_supplements[playerID].GetGame().DoMove(playerID, move_x, move_y);
+          state.SetLocal(inst.args[2], 1);
+        } else {
+          state.SetLocal(inst.args[2], 0);
+        }
+      }, 3, "WM[ARG3] = Did placement succeed?");
+      // - PlaceOppXY-HW       -> Place opp marker (if valid) @ XY on module board.
+      inst_lib->AddInst("PlaceOppXY-HW", [this](hardware_t & hw, const inst_t & inst) {
+        state_t & state = hw.GetCurState();
+        const size_t move_x = state.GetLocal(inst.args[0]);
+        const size_t move_y = state.GetLocal(inst.args[1]);
+        const size_t playerID = hw.GetTrait(TRAIT_ID__PLAYER_ID);
+        const size_t oppID = this->othello.GetCurGame().GetOpponentID(playerID);
+        if (this->othello_hw_supplements[playerID].GetGame().IsMoveValid(oppID, move_x, move_y)) {
+          this->othello_hw_supplements[playerID].GetGame().DoMove(oppID, move_x, move_y);
+          state.SetLocal(inst.args[2], 1);
+        } else {
+          state.SetLocal(inst.args[2], 0);
+        }
+      }, 3, "WM[ARG3] = Did placement succeed?");
+      // - FlipCntXY-HW        -> How many disks would flip (with respect to active hw board)?
+      inst_lib->AddInst("FlipCntXY-HW", [this](hardware_t & hw, const inst_t & inst) {
+        state_t & state = hw.GetCurState();
+        const size_t move_x = state.GetLocal(inst.args[0]);
+        const size_t move_y = state.GetLocal(inst.args[1]);
+        const size_t move_id = this->othello.GetCurGame().GetPosID(move_x, move_y);
+        const size_t playerID = hw.GetTrait(TRAIT_ID__PLAYER_ID);
+        if (this->othello_hw_supplements[playerID].GetGame().IsMoveValid(playerID, move_id)) {
+          state.SetLocal(inst.args[2], this->othello_hw_supplements[playerID].GetGame().GetFlipList(playerID, move_id).size());
+        } else {
+          state.SetLocal(inst.args[2], 0);
+        }
+      }, 3, "WM[ARG3] = Flip cnt");
+      // - OppFlipCnt-HW
+      inst_lib->AddInst("OppFlipCntXY-HW", [this](hardware_t & hw, const inst_t & inst) {
+        state_t & state = hw.GetCurState();
+        const size_t move_x = state.GetLocal(inst.args[0]);
+        const size_t move_y = state.GetLocal(inst.args[1]);
+        const size_t move_id = this->othello.GetCurGame().GetPosID(move_x, move_y);
+        const size_t playerID = hw.GetTrait(TRAIT_ID__PLAYER_ID);
+        const size_t oppID = this->othello.GetCurGame().GetOpponentID(playerID);
+        if (this->othello_hw_supplements[playerID].GetGame().IsMoveValid(oppID, move_id)) {
+          state.SetLocal(inst.args[2], this->othello_hw_supplements[playerID].GetGame().GetFlipList(oppID, move_id).size());
+        } else {
+          state.SetLocal(inst.args[2], 0);
+        }
+      }, 3, "WM[ARG3] = Flip cnt");
+      // - GetFrontierCnt-HW   -> How many frontier values are in active module?
+      inst_lib->AddInst("FrontierCntXY-HW", [this](hardware_t & hw, const inst_t & inst) {
+        state_t & state = hw.GetCurState();
+        const size_t playerID = hw.GetTrait(TRAIT_ID__PLAYER_ID);
+        state.SetLocal(inst.args[0], this->othello_hw_supplements[playerID].GetGame().GetFrontierPosCnt(playerID));
+      }, 1, "..");
+      // - ResetBoard-HW       -> Reset HW board to match true board.
+      inst_lib->AddInst("ResetBoard-HW", [this](hardware_t & hw, const inst_t & inst) {
+        const size_t playerID = hw.GetTrait(TRAIT_ID__PLAYER_ID);
+        this->othello_hw_supplements[playerID].Reset(this->othello.GetCurGame());
+      }, 0, "..");
+      // - IsOver-HW           -> Is HW board over?
+      inst_lib->AddInst("IsOver-HW", [this](hardware_t & hw, const inst_t & inst) {
+        state_t & state = hw.GetCurState();
+        const size_t playerID = hw.GetTrait(TRAIT_ID__PLAYER_ID);
+        state.SetLocal(inst.args[0], (int)this->othello_hw_supplements[playerID].GetGame().IsOver());
+      }, 1, "..");
+      // - GetValidMove        -> Load true valid move (index into valid moves list).
+      // - SetActiveBoard      -> Set active board specified by argument.
+      // - GetBoardWidth
+      inst_lib->AddInst("BoardWidth", [this](hardware_t & hw, const inst_t & inst) {
+        state_t & state = hw.GetCurState();
+        state.SetLocal(inst.args[0], this->OTHELLO__BOARD_SIZE);
+      }, 1, "..");
+      // - EndTurn
+      inst_lib->AddInst("EndTurn", [this](hardware_t & hw, const inst_t & inst) {
+        hw.SetTrait(TRAIT_ID__DONE, 1);
+      }, 0, "..");
+
       eval_game = [this](hardware_t & hw0, hardware_t & hw1) {
-        if ((size_t)this->random->P(0.5)) {
+        if (this->random->P(0.5)) {
           this->othello.EvalOthello(hw0, hw1, true);
         } else {
           this->othello.EvalOthello(hw1, hw0, false);
         }
         return this->calc_score();
       };
-      // Othello game interface requires:
-      //  - get_move
-      othello.get_move = [this](const hardware_t & hw) { return hw.GetTrait(TRAIT_ID__MOVE); };
-      //  - get_done
-      othello.get_done = [this](const hardware_t & hw) { return (bool)hw.GetTrait(TRAIT_ID__DONE); };
-      //  - begin_turn
-      // Currently only supporting reset between turns...
-      othello.begin_turn = [this](hardware_t & hw) {
-        this->ResetHW(hw);
-        hw.SetTrait(TRAIT_ID__PLAYER_ID, this->othello.GetCurGame().GetCurPlayer());
-      };
-      //  - begin_game
-      othello.begin_game = [this](hardware_t & hw, size_t playerID) {
-        this->ResetHW(hw);
-        hw.SetTrait(TRAIT_ID__PLAYER_ID, playerID);
-      };
 
-      // TODO: configure othello-specific hardware.
+      // TODO: Add support for multiple AI types.
+      eval_game_ai = [this](hardware_t & hw0, size_t ai_type=0) {
+        bool hw_first = this->random->P(0.5);
+        this->othello.EvalOthello_RANDOTHELLO(hw0, *(this->random), 1);
+        return this->calc_score();
+      };
 
     } else {
       std::cout << "Unrecognized PROBLEM. Exiting..." << std::endl;
@@ -797,6 +1093,7 @@ public:
         // std::cout << " Evaluating " << id << std::endl;
         // Our hero.
         Agent & our_hero = world->GetOrg(id);
+        our_hero.scores_by_trial.resize(TRIAL_CNT, 0);
         LoadEvalHWProgram(our_hero.GetGenome());
         // The evil antagonist.
         Agent & opponent = world->GetRandomOrg();
@@ -804,7 +1101,7 @@ public:
         // Who makes the first move?
         for (size_t trialID = 0; trialID < TRIAL_CNT; ++trialID) {
           // Evaluate game.
-          our_hero.scores_by_trial.emplace_back(eval_game(*eval_hw, *opp_hw));
+          our_hero.scores_by_trial[trialID] = eval_game(*eval_hw, *opp_hw);
         }
         double fitness = world->CalcFitnessOrg(our_hero);
         // std::cout << "  Score: " << fitness << std::endl;
@@ -830,6 +1127,38 @@ public:
 
   void RunAnalysis() {
     std::cout << "\nRunning analysis...\n" << std::endl;
+    switch (ANALYSIS) {
+      case 0: {
+        // Configure analysis program.
+        program_t analyze_prog(inst_lib);
+        std::ifstream analyze_fstream(ANALYZE_AGENT_FPATH);
+        if (!analyze_fstream.is_open()) {
+          std::cout << "Failed to open analysis program file(" << ANALYZE_AGENT_FPATH << "). Exiting..." << std::endl;
+          exit(-1);
+        }
+        analyze_prog.Load(analyze_fstream);
+        std::cout << " --- Analysis program: ---" << std::endl;
+        analyze_prog.PrintProgramFull();
+        std::cout << " -------------------------" << std::endl;
+
+        Agent our_hero(analyze_prog);
+        our_hero.scores_by_trial.resize(TRIAL_CNT, 0);
+        LoadEvalHWProgram(our_hero.GetGenome());
+        othello.SetVerbose(true);
+        for (size_t trialID = 0; trialID < TRIAL_CNT; ++trialID) {
+          std::cout << "================ TRIAL " << trialID << "================" << std::endl;
+          our_hero.scores_by_trial[trialID] = eval_game_ai(*eval_hw,0);
+          std::cout << "-- Trail score: " << our_hero.scores_by_trial[trialID] << std::endl;
+        }
+
+        double fitness = world->CalcFitnessOrg(our_hero);
+        std::cout << "Agent fitness: " << fitness << std::endl;
+        break;
+      }
+      default:
+        std::cout << "Unrecognized analysis." << std::endl;
+        break;
+    }
   }
 
   /// Mutate organism function.
