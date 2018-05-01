@@ -43,7 +43,7 @@ EMP_BUILD_CONFIG( TMazeConfig,
   VALUE(SYSTEMATICS_INTERVAL, size_t, 100, "Interval to record systematics summary stats."),
   VALUE(FITNESS_INTERVAL, size_t, 100, "Interval to record fitness summary stats."),
   VALUE(POP_SNAPSHOT_INTERVAL, size_t, 10000, "Interval to take a full snapshot of the population."),
-  VALUE(DATA_DIRECTORY, std::string, "./", "Location to dump data output.")
+  VALUE(DATA_DIRECTORY, std::string, "./output", "Location to dump data output.")
 )
 
 #endif

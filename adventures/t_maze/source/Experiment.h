@@ -11,6 +11,7 @@
 #include <functional>
 #include <deque>
 #include <unordered_set>
+#include <unordered_map>
 
 #include "base/Ptr.h"
 #include "base/vector.h"
@@ -25,6 +26,7 @@
 #include "tools/string_utils.h"
 
 #include "t_maze-config.h"
+#include "TMaze.h"
 
 // Globals
 constexpr size_t RUN_ID__EXP = 0;
@@ -36,8 +38,9 @@ constexpr size_t SIMILARITY_ADJUSTMENT_METHOD_ID__MULT = 1;
 constexpr size_t REF_MOD_ADJUSTMENT_TYPE_ID__ADD = 0;
 constexpr size_t REF_MOD_ADJUSTMENT_TYPE_ID__MULT = 1;
 
-
 constexpr size_t TAG_WIDTH = 16;
+
+constexpr double MIN_POSSIBLE_SCORE = -32767;
 
 /// Class to manage t-maze experiment. 
 class Experiment {
@@ -60,13 +63,14 @@ public:
   using memory_t = hardware_t::memory_t;
   using tag_t = hardware_t::affinity_t;
   using exec_stk_t = hardware_t::exec_stk_t;
-  // - World aliases
-  using world_t = emp::World<Agent>;
 
   using agent_t = Agent;
   using phenotype_t = Phenotype;
   using phen_cache_t = PhenotypeCache;
-  
+
+  // - World aliases
+  using world_t = emp::World<agent_t>;
+
   /// Agent to be evolved. 
   struct Agent {
     size_t agent_id;
@@ -89,70 +93,33 @@ public:
   };
 
   class PhenotypeCache {
-  protected:
-    size_t agent_cnt;
-    size_t eval_cnt;
-    emp::vector<phenotype_t> agent_phen_cache;
+    protected:
+      size_t agent_cnt;
+      size_t eval_cnt;
+      emp::vector<phenotype_t> agent_phen_cache;
 
-  public:
-    PhenotypeCache(size_t _agent_cnt, size_t _eval_cnt) 
-      : agent_cnt(_agent_cnt), eval_cnt(_eval_cnt), 
-        agent_phen_cache(agent_cnt * eval_cnt)
-    { ; }
+    public:
+      PhenotypeCache(size_t _agent_cnt, size_t _eval_cnt) 
+        : agent_cnt(_agent_cnt), eval_cnt(_eval_cnt), 
+          agent_phen_cache(agent_cnt * eval_cnt)
+      { ; }
 
-    /// Resize phenotype cache. 
-    void Resize(size_t _agent_cnt, size_t _eval_cnt) {
-      agent_cnt = _agent_cnt;
-      eval_cnt = _eval_cnt;
-      agent_phen_cache.clear();
-      agent_phen_cache.resize(agent_cnt * eval_cnt);
-    }
+      /// Resize phenotype cache. 
+      void Resize(size_t _agent_cnt, size_t _eval_cnt) {
+        agent_cnt = _agent_cnt;
+        eval_cnt = _eval_cnt;
+        agent_phen_cache.clear();
+        agent_phen_cache.resize(agent_cnt * eval_cnt);
+      }
 
-    /// Access a phenotype from the cache
-    phenotype_t & Get(size_t agent_id, size_t eval_id) {
-      return agent_phen_cache[(agent_id * eval_cnt) + eval_id];
-    }
+      /// Access a phenotype from the cache
+      phenotype_t & Get(size_t agent_id, size_t eval_id) {
+        return agent_phen_cache[(agent_id * eval_cnt) + eval_id];
+      }
 
-    // TODO: reset entire cache
-    // void Reset() { ; }
+      // TODO: reset entire cache
+      // void Reset() { ; }
   };
-
-  /// Scratch/test function.
-  /// This function exists to test experiment implementation as I code it up.
-  void Test() {
-    std::cout << "Testing experiment!" << std::endl;
-
-    std::cout << "Loading test program!" << std::endl;
-    program_t test_prog(inst_lib);
-    std::ifstream test_prog_fstream(ANCESTOR_FPATH);
-    if (!test_prog_fstream.is_open()) {
-      std::cout << "Failed to open test program file (" << ANCESTOR_FPATH << ")!" << std::endl;
-      exit(-1);
-    }
-    test_prog.Load(test_prog_fstream);
-    std::cout << " --- Test program: --- " << std::endl;
-    test_prog.PrintProgramFull();
-    std::cout << " --------------------- " << std::endl;
-
-    // 2) Run program!
-    eval_hw->SetProgram(test_prog);
-    eval_hw->ResetHardware();
-    eval_hw->SpawnCore(0, memory_t(), false);
-    // - Print hardware state
-    std::cout << "=== INITIAL STATE ===" << std::endl;
-    eval_hw->PrintState();
-    for (size_t t = 0; t < 32; ++t) {
-      eval_hw->SingleProcess();
-      std::cout << "=== T: " << t << " ===" << std::endl;
-      // Print function modifiers
-      std::cout << "Function modifiers:";
-      for (size_t fID = 0; fID < eval_hw->GetProgram().GetSize(); ++fID) {
-        std::cout << " " << fID << ":" << eval_hw->GetProgram()[fID].GetRefModifier(); 
-      } std::cout << "\n";
-      eval_hw->PrintState();
-    }
-
-  }
 
 protected:
   // Configuration parameters
@@ -214,6 +181,8 @@ protected:
 
   phen_cache_t phen_cache;
 
+  TMaze maze;
+
   // Run signals
   emp::Signal<void(void)> do_begin_run_setup_sig;   ///< Triggered at begining of run.
   emp::Signal<void(void)> do_pop_init_sig;          ///< Triggered during run setup. Defines way population is initialized.
@@ -228,11 +197,53 @@ protected:
   emp::Signal<void(agent_t &)> begin_agent_trial_sig; ///< Triggered at the beginning of an agent trial.
   emp::Signal<void(agent_t &)> record_cur_phenotype_sig;  ///< Triggered at end of agent evaluation. Should do anything necessary to record agent phenotype.
   
+
+  void Evaluate(agent_t & agent) {
+    begin_agent_eval_sig.Trigger(agent);
+    // ... 
+  }
+  
+  /// Scratch/test function.
+  /// This function exists to test experiment implementation as I code it up.
+  void Test() {
+    std::cout << "Testing experiment!" << std::endl;
+
+    std::cout << "Loading test program!" << std::endl;
+    program_t test_prog(inst_lib);
+    std::ifstream test_prog_fstream(ANCESTOR_FPATH);
+    if (!test_prog_fstream.is_open()) {
+      std::cout << "Failed to open test program file (" << ANCESTOR_FPATH << ")!" << std::endl;
+      exit(-1);
+    }
+    test_prog.Load(test_prog_fstream);
+    std::cout << " --- Test program: --- " << std::endl;
+    test_prog.PrintProgramFull();
+    std::cout << " --------------------- " << std::endl;
+
+    // 2) Run program!
+    eval_hw->SetProgram(test_prog);
+    eval_hw->ResetHardware();
+    eval_hw->SpawnCore(0, memory_t(), false);
+    // - Print hardware state
+    std::cout << "=== INITIAL STATE ===" << std::endl;
+    eval_hw->PrintState();
+    for (size_t t = 0; t < 32; ++t) {
+      eval_hw->SingleProcess();
+      std::cout << "=== T: " << t << " ===" << std::endl;
+      // Print function modifiers
+      std::cout << "Function modifiers:";
+      for (size_t fID = 0; fID < eval_hw->GetProgram().GetSize(); ++fID) {
+        std::cout << " " << fID << ":" << eval_hw->GetProgram()[fID].GetRefModifier(); 
+      } std::cout << "\n";
+      eval_hw->PrintState();
+    }
+  }
 public:
 
   Experiment(const TMazeConfig & config) 
     : update(0), eval_id(0), eval_time(0),
-      dom_agent_id(0), phen_cache(0, 0)
+      dom_agent_id(0), phen_cache(0, 0),
+      maze()
   { 
     // Load configuration parameters. 
     // - General parameters
@@ -307,16 +318,37 @@ public:
     random.Delete();
   }
 
-  // Do config functions
-  void DoConfig__Hardware();  // TODO: function comment
-  void DoConfig__Run();       // TODO: implement config run
-  void DoConfig__Analysis();  // TODO: implement config analysis
+  // TODO: function documentation!
 
-  // Extra SignalGP instruction definitions
+  // === Do experiment functions ===
+  void Run();
+  void RunStep();
+
+  // === Do config functions ===
+  /// DoConfig__Hardware
+  /// Calling this function configures the evaluation hardware based on experiment configuration settings. 
+  void DoConfig__Hardware(); 
+  
+  /// DoConfig__Run
+  /// Calling this function configures the experiment (to be run) based on experiment settings. 
+  void DoConfig__Experiment();
+
+  /// DoConfig__Analysis
+  /// Calling this function configures analysis mode (to be run). 
+  void DoConfig__Analysis();  
+  
+  // === Evolution functions ===
+  size_t Mutate(agent_t & agent, emp::Random & rnd);
+  double CalcFitness(agent_t & agent);
+
+  // === Misc. utility functions ===
+  void InitPopulation__FromAncestorFile();
+
+  // === Extra SignalGP instruction definitions ===
   // -- Execution control instructions --
-  static void Inst_Call(hardware_t & hw, const inst_t & inst);      // TODO: Inst_Call comment
-  static void Inst_Fork(hardware_t & hw, const inst_t & inst);      // TODO: Inst_Fork comment
-  static void Inst_Terminate(hardware_t & hw, const inst_t & inst); // TODO: Inst_Terminate comment
+  static void Inst_Call(hardware_t & hw, const inst_t & inst);      
+  static void Inst_Fork(hardware_t & hw, const inst_t & inst);      
+  static void Inst_Terminate(hardware_t & hw, const inst_t & inst); 
 
 };
 
@@ -334,6 +366,241 @@ void Experiment::Inst_Terminate(hardware_t & hw, const inst_t & inst)  {
   // Pop all the call states from current core.
   exec_stk_t & core = hw.GetCurCore();
   core.resize(0);
+}
+
+// ================== Run experiment implementations ==================
+void Experiment::Run() {
+  switch (RUN_MODE) {
+    case RUN_ID__EXP: {
+      do_begin_run_setup_sig.Trigger();
+      for (update = 0; update <= GENERATIONS; ++update) {
+        RunStep();
+      }
+      break;
+    }
+    case RUN_ID__ANALYSIS: {
+      do_analysis_sig.Trigger();
+      break;
+    }
+    default: {
+      std::cout << "Unrecognized run mode (" << RUN_MODE << "). Exiting..." << std::endl;
+      exit(-1);
+    }
+  }
+}
+
+void Experiment::RunStep() {
+  do_evaluation_sig.Trigger();
+  do_selection_sig.Trigger();
+  do_world_update_sig.Trigger();
+}
+
+// ================== Misc. utility function implementations ==================
+void Experiment::InitPopulation__FromAncestorFile() {
+  std::cout << "Initializing population from ancestor file (" << ANCESTOR_FPATH << ")!" << std::endl;
+  // Configure the ancestor program.
+  program_t ancestor_prog(inst_lib);
+  std::ifstream ancestor_fstream(ANCESTOR_FPATH);
+  if (!ancestor_fstream.is_open()) {
+    std::cout << "Failed to open ancestor program file(" << ANCESTOR_FPATH << "). Exiting..." << std::endl;
+    exit(-1);
+  }
+  ancestor_prog.Load(ancestor_fstream);
+  std::cout << " --- Ancestor program: ---" << std::endl;
+  ancestor_prog.PrintProgramFull();
+  std::cout << " -------------------------" << std::endl;
+  world->Inject(ancestor_prog, 1);    // Inject single, common ancestor into population.
+}
+
+// ================== Evolution function implementations ==================
+size_t Experiment::Mutate(agent_t & agent, emp::Random & rnd) {
+  program_t & program = agent.GetGenome();
+  size_t mut_cnt = 0;
+  size_t expected_prog_len = program.GetInstCnt();
+
+  // Duplicate a (single) function?
+  if (rnd.P(SGP__PER_FUNC__FUNC_DUP_RATE) && program.GetSize() < SGP_PROG_MAX_FUNC_CNT)
+  {
+    const uint32_t fID = rnd.GetUInt(program.GetSize());
+    // Would function duplication make expected program length exceed max?
+    if (expected_prog_len + program[fID].GetSize() <= SGP_PROG_MAX_TOTAL_LEN)
+    {
+      program.PushFunction(program[fID]);
+      expected_prog_len += program[fID].GetSize();
+      ++mut_cnt;
+    }
+  }
+
+  // Delete a (single) function?
+  if (rnd.P(SGP__PER_FUNC__FUNC_DEL_RATE) && program.GetSize() > SGP_PROG_MIN_FUNC_CNT)
+  {
+    const uint32_t fID = rnd.GetUInt(program.GetSize());
+    expected_prog_len -= program[fID].GetSize();
+    program[fID] = program[program.GetSize() - 1];
+    program.program.resize(program.GetSize() - 1);
+    ++mut_cnt;
+  }
+
+  // For each function...
+  for (size_t fID = 0; fID < program.GetSize(); ++fID)
+  {
+
+    // Mutate affinity
+    for (size_t i = 0; i < program[fID].GetAffinity().GetSize(); ++i)
+    {
+      tag_t &aff = program[fID].GetAffinity();
+      if (rnd.P(SGP__PER_BIT__TAG_BFLIP_RATE))
+      {
+        ++mut_cnt;
+        aff.Set(i, !aff.Get(i));
+      }
+    }
+
+    // Slip-mutation?
+    if (rnd.P(SGP__PER_FUNC__SLIP_RATE))
+    {
+      uint32_t begin = rnd.GetUInt(program[fID].GetSize());
+      uint32_t end = rnd.GetUInt(program[fID].GetSize());
+      const bool dup = begin < end;
+      const bool del = begin > end;
+      const int dup_size = end - begin;
+      const int del_size = begin - end;
+      // If we would be duplicating and the result will not exceed maximum program length, duplicate!
+      if (dup && (expected_prog_len + dup_size <= SGP_PROG_MAX_TOTAL_LEN) && (program[fID].GetSize() + dup_size <= SGP_PROG_MAX_FUNC_LEN))
+      {
+        // duplicate begin:end
+        const size_t new_size = program[fID].GetSize() + (size_t)dup_size;
+        hardware_t::Function new_fun(program[fID].GetAffinity());
+        for (size_t i = 0; i < new_size; ++i)
+        {
+          if (i < end)
+            new_fun.PushInst(program[fID][i]);
+          else
+            new_fun.PushInst(program[fID][i - dup_size]);
+        }
+        program[fID] = new_fun;
+        ++mut_cnt;
+        expected_prog_len += dup_size;
+      }
+      else if (del && ((program[fID].GetSize() - del_size) >= SGP_PROG_MIN_FUNC_LEN))
+      {
+        // delete end:begin
+        hardware_t::Function new_fun(program[fID].GetAffinity());
+        for (size_t i = 0; i < end; ++i)
+          new_fun.PushInst(program[fID][i]);
+        for (size_t i = begin; i < program[fID].GetSize(); ++i)
+          new_fun.PushInst(program[fID][i]);
+        program[fID] = new_fun;
+        ++mut_cnt;
+        expected_prog_len -= del_size;
+      }
+    }
+
+    // Substitution mutations? (pretty much completely safe)
+    for (size_t i = 0; i < program[fID].GetSize(); ++i)
+    {
+      inst_t &inst = program[fID][i];
+      // Mutate affinity (even when it doesn't use it).
+      for (size_t k = 0; k < inst.affinity.GetSize(); ++k)
+      {
+        if (rnd.P(SGP__PER_BIT__TAG_BFLIP_RATE))
+        {
+          ++mut_cnt;
+          inst.affinity.Set(k, !inst.affinity.Get(k));
+        }
+      }
+
+      // Mutate instruction.
+      if (rnd.P(SGP__PER_INST__SUB_RATE))
+      {
+        ++mut_cnt;
+        inst.id = rnd.GetUInt(program.GetInstLib()->GetSize());
+      }
+
+      // Mutate arguments (even if they aren't relevent to instruction).
+      for (size_t k = 0; k < hardware_t::MAX_INST_ARGS; ++k)
+      {
+        if (rnd.P(SGP__PER_INST__SUB_RATE))
+        {
+          ++mut_cnt;
+          inst.args[k] = rnd.GetInt(SGP__PROG_MAX_ARG_VAL);
+        }
+      }
+    }
+
+    // Insertion/deletion mutations?
+    // - Compute number of insertions.
+    int num_ins = rnd.GetRandBinomial(program[fID].GetSize(), SGP__PER_INST__INS_RATE);
+    // Ensure that insertions don't exceed maximum program length.
+    if ((num_ins + program[fID].GetSize()) > SGP_PROG_MAX_FUNC_LEN)
+    {
+      num_ins = SGP_PROG_MAX_FUNC_LEN - program[fID].GetSize();
+    }
+    if ((num_ins + expected_prog_len) > SGP_PROG_MAX_TOTAL_LEN)
+    {
+      num_ins = SGP_PROG_MAX_TOTAL_LEN - expected_prog_len;
+    }
+    expected_prog_len += num_ins;
+
+    // Do we need to do any insertions or deletions?
+    if (num_ins > 0 || SGP__PER_INST__DEL_RATE > 0.0)
+    {
+      size_t expected_func_len = num_ins + program[fID].GetSize();
+      // Compute insertion locations and sort them.
+      emp::vector<size_t> ins_locs = emp::RandomUIntVector(rnd, num_ins, 0, program[fID].GetSize());
+      if (ins_locs.size())
+        std::sort(ins_locs.begin(), ins_locs.end(), std::greater<size_t>());
+      hardware_t::Function new_fun(program[fID].GetAffinity());
+      size_t rhead = 0;
+      while (rhead < program[fID].GetSize())
+      {
+        if (ins_locs.size())
+        {
+          if (rhead >= ins_locs.back())
+          {
+            // Insert a random instruction.
+            new_fun.PushInst(rnd.GetUInt(program.GetInstLib()->GetSize()),
+                             rnd.GetInt(SGP__PROG_MAX_ARG_VAL),
+                             rnd.GetInt(SGP__PROG_MAX_ARG_VAL),
+                             rnd.GetInt(SGP__PROG_MAX_ARG_VAL),
+                             tag_t());
+            new_fun.inst_seq.back().affinity.Randomize(rnd);
+            ++mut_cnt;
+            ins_locs.pop_back();
+            continue;
+          }
+        }
+        // Do we delete this instruction?
+        if (rnd.P(SGP__PER_INST__DEL_RATE) && (expected_func_len > SGP_PROG_MIN_FUNC_LEN))
+        {
+          ++mut_cnt;
+          --expected_prog_len;
+          --expected_func_len;
+        }
+        else
+        {
+          new_fun.PushInst(program[fID][rhead]);
+        }
+        ++rhead;
+      }
+      program[fID] = new_fun;
+    }
+  }
+  return mut_cnt;
+}
+
+double Experiment::CalcFitness(agent_t & agent) {
+  size_t aID = agent.GetID();
+  size_t eID = 0;
+  // TODO: implement this! (requires me knowing what Phenotype will look like...)
+  // double val = ;
+  // size_t mt = 0;
+  // for (size_t i = 0; i < scores_by_trial.size(); ++i) {
+  //   const double trial_score = scores_by_trial[i];
+  //   if (trial_score < val) { val = trial_score; mt = i; }
+  // }
+  // min_trial = mt;
+  return 0.0;
 }
 
 // ================== Configuration implementations ==================
@@ -463,6 +730,75 @@ void Experiment::DoConfig__Hardware() {
   eval_hw->SetMaxCores(SGP_HW_MAX_CORES);
   eval_hw->SetMaxCallDepth(SGP_HW_MAX_CALL_DEPTH);
 
+}
+
+void Experiment::DoConfig__Experiment() {
+  // Make a data directory. 
+  mkdir(DATA_DIRECTORY.c_str(), ACCESSPERMS);
+  if (DATA_DIRECTORY.back() != '/') DATA_DIRECTORY += '/';
+
+  // Configure the world
+  world->Reset();
+  world->SetWellMixed(true);
+  world->SetFitFun([this](agent_t & agent) { return this->CalcFitness(agent); });
+  world->SetMutFun([this](agent_t & agent, emp::Random & rnd) { return this->Mutate(agent, rnd); });
+
+  // Configure run/eval signals 
+  // - On population initialization:
+  do_pop_init_sig.AddAction([this]() { this->InitPopulation__FromAncestorFile(); });
+  
+  // - On run setup (one-time things that need to happen right before running the experiment):
+  do_begin_run_setup_sig.AddAction([this]() {
+    std::cout << "Doing initial run setup!" << std::endl;
+    // Setup systematics/fitness tracking.
+    auto & sys_file = world->SetupSystematicsFile(DATA_DIRECTORY + "systematics.csv");
+    sys_file.SetTimingRepeat(SYSTEMATICS_INTERVAL);
+    auto & fit_file = world->SetupFitnessFile(DATA_DIRECTORY + "fitness.csv");
+    fit_file.SetTimingRepeat(FITNESS_INTERVAL);
+    // TODO: add any extra fitness tracking files
+    // Initialize the population. 
+    do_pop_init_sig.Trigger();
+  });
+  
+  // - On (whole-population, single-generation) evaluation:
+  do_evaluation_sig.AddAction([this]() {
+    double best_score = MIN_POSSIBLE_SCORE;
+    dom_agent_id = 0;
+
+    for (size_t id = 0; id < world->GetSize(); ++id) {
+      // Load and configure agent
+      agent_t & our_hero = world->GetOrg(id);
+      our_hero.SetID(id);
+      // Take care of one-time stuff for this evaluation.
+      eval_hw->SetProgram(our_hero.GetGenome());
+      // Evaluate!
+      this->Evaluate(our_hero);
+      double score = CalcFitness(our_hero);
+      if (score > best_score) { best_score = score; dom_agent_id = id; }
+    }
+
+    std::cout << "Update: " << update << " Max score: " << best_score << std::endl;
+
+  });
+  
+  
+  // do_evaluation_sig
+  // do_selection_sig
+  // do_world_update_sig
+
+  // NOTE: there may be multiple evaluations for each agent.
+  begin_agent_eval_sig.AddAction([this](agent_t & agent) {
+    // Reset hardware
+    eval_hw->ResetHardware();
+    // TODO: Reset traits  
+    // ... need to know what the task looks like... 
+  });
+  
+  // NOTE: mutate after update; snapshot before update
+}
+
+void Experiment::DoConfig__Analysis() {
+  // TODO: implement do config analysis... 
 }
 
 #endif
