@@ -2,12 +2,32 @@
 
 #include <iostream>
 
-#include "base/vector.h"
 #include "config/command_line.h"
+#include "config/ArgManager.h"
+
+#include "../t_maze-config.h"
+#include "../Experiment.h"
 
 int main(int argc, char* argv[])
 {
-  emp::vector<std::string> args = emp::cl::args_to_strings(argc, argv);
+  // Read configs.
+  std::string config_fname = "configs.cfg";
+  auto args = emp::cl::ArgManager(argc, argv);
+  TMazeConfig config;
+  config.Read(config_fname);
 
-  std::cout << "Hello World!" << std::endl;
+  if (args.ProcessConfigOptions(config, std::cout, config_fname, "../dol-config.h") == false)
+    exit(0);
+  if (args.TestUnknown() == false)
+    exit(0);
+
+  std::cout << "==============================" << std::endl;
+  std::cout << "|    How am I configured?    |" << std::endl;
+  std::cout << "==============================" << std::endl;
+  config.Write(std::cout);
+  std::cout << "==============================\n"
+            << std::endl;
+
+  Experiment e(config);
+  // e.Run();
 }
