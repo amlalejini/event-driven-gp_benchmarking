@@ -19,5 +19,20 @@ A subject must navigate the maze to collect one of the rewards and then return t
 
 Here, I'm using a T-maze task to evaluate SignalGP function regulation. The idea is that function regulation gives SignalGP agents a way to regulate their response to external events/inputs in response to feedbacks, (perhaps) making it easier to encode within-evaluation learning. 
 
+## Implementation-specific Details
+How am I actually coding up these t-maze evaluations? 
+
+**Sensing** <br>
+How do agents sense their location in the grid? There are a few sensing options that could be made available to agents:
+- Auto-trigger events (corresponding to current grid position) everytime we need an action (i.e. actions are given in response to events). E.g., there would be an initial 'start' event, and every time the agent performs an action before time is up, there would be an event corresponding to the grid cell the agent is currently occupying. Or, only trigger an event when an event moves to a *new* cell. 
+- Sense-trigger events. Events (corresponding to the current grid position) are triggered at the request of a SignalGP agent via the execution of an instruction. 
+- Sense instruction. Executing an instruction provides sensory information in memory locations specified by instruction-arguments. 
+
+**Actuation** <br>
+How should agents actuate? I.e., how should agents move through the maze? Again, a few options:
+- Give T total time where agents are always executing instructions. When an agent executes an actuation instruction, the actuation is done, and execution continues (events may be triggered, etc). 
+- Treat the SignalGP agents more like neural networks. Give them T time steps *per-actuation*. Between actuations, kill all active threads. We can wipe/not wipe shared memory and function reference modifiers (function regulation). 
+
+
 # References
 Soltoggio, A., Bullinaria, J. A., Mattiussi, C., Dürr, P., & Floreano, D. (2008). Evolutionary Advantages of Neuromodulated Plasticity in Dynamic, Reward-based Scenarios. Artificial Life XI: Proceedings of the 11th International Conference on Simulation and Synthesis of Living Systems (ALIFE 2008), 2, 569–576. https://doi.org/10.1.1.210.6989
