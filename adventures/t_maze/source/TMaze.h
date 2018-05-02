@@ -19,14 +19,17 @@
 #include "tools/math.h"
 #include "tools/string_utils.h"
 
+// TODO: function/class member documentation!
+
 /// Class to represent a T-maze
 class TMaze {
   public:
 
     enum Facing {N=0, E, S, W};
-    enum CellType {START, REWARD, DECISION, CORRIDOR};
-
+    enum CellType {START=0, REWARD, DECISION, CORRIDOR};
     static constexpr size_t NUM_DIRECTIONS = 4;
+
+    // A few utility functions dealing with maze facing
     static constexpr Facing GetFacing(size_t i) { 
       emp_assert(i < NUM_DIRECTIONS); return static_cast<Facing>(i); 
     }
@@ -62,6 +65,11 @@ class TMaze {
       std::unordered_map<Facing, size_t> neighbors;
       CellType type;
       double value;
+
+      const std::unordered_map<Facing, size_t> & GetNeighbors() const { return neighbors; }
+      CellType GetType() const { return type; }
+      double GetValue() const { return value; }
+
     };
 
   protected:
@@ -138,15 +146,10 @@ class TMaze {
       rew_cell2.type = CellType::REWARD;
       rew_cell2.neighbors.emplace(Facing::W, maze_id-1);
 
-      // Zero out e'rybody's values! 
-      for (size_t i = 0; i < maze.size(); ++i) { maze[i].value = 0; }
-      // Set reward cell values. 
       large_reward_cell_id = reward_cell_ids[0];
-      maze[reward_cell_ids[0]].value = large_reward_val;
-      maze[reward_cell_ids[1]].value = small_reward_val;
-      std::cout << "--Build maze--" << std::endl;
-      std::cout << large_reward_val << std::endl;
-      std::cout << small_reward_val << std::endl;
+      // TODO: set reward
+      ResetRewards();
+
     }
 
   public:
@@ -162,12 +165,54 @@ class TMaze {
       BuildMaze(); 
     }
 
+    size_t GetSize() const { return maze.size(); }
+
+    size_t GetCorridorLen() const { return corridor_len; }
+
+    size_t GetLargeRewardCellID() const { return large_reward_cell_id; }
+    size_t GetStartCellID() const { return start_cell_id; }
+    size_t GetJunctionCellID() const { return junction_cell_id; }
+    const emp::vector<size_t> & GetRewardCellIDs() const { return reward_cell_ids; }
+
+    double GetSmallRewardValue() const { return small_reward_val; }
+    double GetLargeRewardValue() const { return large_reward_val; }
+
+    Cell & GetCell(size_t id) {
+      emp_assert(id < maze.size());
+      return maze[id];
+    }
+
     void Resize(size_t _corridor_len) {
       corridor_len = _corridor_len;
       maze.clear();
-      maze.resize((3*corridor_len) + 4);
-      
+      maze.resize((3*corridor_len) + 4); 
       BuildMaze();
+    }
+
+    void ResetRewards() {
+       // Zero out e'rybody's values! 
+      for (size_t i = 0; i < maze.size(); ++i) { maze[i].value = 0; }
+      // Set reward cell values. 
+      for (size_t r = 0; r < reward_cell_ids.size(); ++r) {
+        const size_t rID = reward_cell_ids[r];
+        maze[rID].value = ((rID == large_reward_cell_id) ? large_reward_val : small_reward_val);
+      }
+    }
+
+    void ClearRewards() {
+      for (size_t r = 0; r < reward_cell_ids.size(); ++r) {
+        maze[reward_cell_ids[r]].value = 0;
+      }
+    }
+
+    void RandomizeRewards(emp::Random & rnd) {
+      large_reward_cell_id = rnd.GetUInt(reward_cell_ids.size());
+      ResetRewards();
+    }
+
+    void SwitchRewards() {
+      large_reward_cell_id = (large_reward_cell_id == reward_cell_ids[0]) ? reward_cell_ids[1] : reward_cell_ids[0];
+      ResetRewards();
     }
 
     void Print(std::ostream & os=std::cout) {
@@ -192,7 +237,6 @@ class TMaze {
         } os << "\n";
       }
     }
-
 
 };
 

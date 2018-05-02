@@ -38,7 +38,24 @@ constexpr size_t SIMILARITY_ADJUSTMENT_METHOD_ID__MULT = 1;
 constexpr size_t REF_MOD_ADJUSTMENT_TYPE_ID__ADD = 0;
 constexpr size_t REF_MOD_ADJUSTMENT_TYPE_ID__MULT = 1;
 
+constexpr size_t SELECTION_METHOD_ID__TOURNAMENT = 0;
+
+constexpr size_t MAZE_TRIAL_EXECUTION_METHOD_ID__CONTINUOUS = 0;
+constexpr size_t MAZE_TRIAL_EXECUTION_METHOD_ID__STEPS = 1;
+
 constexpr size_t TAG_WIDTH = 16;
+
+constexpr size_t TRAIT_ID__LOC = 0;
+constexpr size_t TRAIT_ID__FACING = 1;
+constexpr size_t TRAIT_ID__LAST_ACTION = 2;
+
+constexpr size_t ACTION_ID__NONE = 0;
+constexpr size_t ACTION_ID__FORWARD = 1;
+constexpr size_t ACTION_ID__ROT_CW = 2;
+constexpr size_t ACTION_ID__ROT_CCW = 3;
+
+constexpr size_t EVENT_DATA_ID__VALUE = 0;
+constexpr size_t EVENT_DATA_ID__PENALTY_FB = 1;
 
 constexpr double MIN_POSSIBLE_SCORE = -32767;
 
@@ -129,11 +146,23 @@ protected:
   size_t POP_SIZE;
   size_t GENERATIONS;
   std::string ANCESTOR_FPATH;
-  size_t EVALUATION_CNT;
   // - Selection group
   size_t SELECTION_METHOD;
   size_t TOURNAMENT_SIZE;
   size_t ELITE_SELECT__ELITE_CNT;
+ // - Evaluation group
+  size_t EVALUATION_CNT;
+  size_t MAZE_TRIAL_CNT;
+  size_t MAZE_TRIAL_EXECUTION_METHOD;
+  bool AFTER_ACTION__KILL_THREADS;
+  bool AFTER_ACTION__WIPE_SHARED_MEM;
+  bool AFTER_ACTION__SIGNAL;
+  bool AFTER_MAZE_TRIAL__WIPE_SHARED_MEM;
+  bool AFTER_MAZE_TRIAL__CLEAR_FUNC_REF_MODS;
+  bool POLLING_SENSORS;
+  size_t MAZE_TRIAL_STEPS;
+  size_t TIME_PER_ACTION;
+  size_t MAZE_TRIAL_TIME;
   // - T-maze group
   size_t MAZE_CORRIDOR_LEN;
   // - SignalGP function regulation group
@@ -177,7 +206,13 @@ protected:
 
   size_t update;    ///< Current update (generation) of experiment
   size_t eval_id;   ///< Current trial of current evaluation. (only meaningful during an agent evaluation)
-  size_t eval_time; ///< Current evaluation time within a trial. (only meaningful within an trial evaluation)
+  size_t maze_trial_id; ///< Current maze trial within a single evaluation. 
+  
+  size_t trial_time; ///< Current time within a maze_trial. 
+  size_t trial_step; ///< Current 'action step' of trial. 
+
+  // bool performed_;
+  // bool done_trial;
 
   size_t dom_agent_id;  ///< ID of the best agent found so far. (only meaningful during/at end of evaluating entire population)
 
@@ -188,6 +223,7 @@ protected:
   // Run signals
   emp::Signal<void(void)> do_begin_run_setup_sig;   ///< Triggered at begining of run.
   emp::Signal<void(void)> do_pop_init_sig;          ///< Triggered during run setup. Defines way population is initialized.
+  
   emp::Signal<void(void)> do_evaluation_sig;        ///< Triggered during run step. Should trigger population-wide agent evaluation.
   emp::Signal<void(void)> do_selection_sig;         ///< Triggered during run step. Should trigger selection (which includes selection, reproduction, and mutation).
   emp::Signal<void(void)> do_world_update_sig;      ///< Triggered during run step. Should trigger world->Update(), and whatever else should happen right before/after population turnover.
@@ -195,16 +231,36 @@ protected:
 
   // Systematics signals
   emp::Signal<void(size_t)> do_pop_snapshot_sig;      ///< Triggered if we should take a snapshot of the population (as defined by POP_SNAPSHOT_INTERVAL). Should call appropriate functions to take snapshot.
-  emp::Signal<void(agent_t &)> begin_agent_eval_sig;  ///< Triggered at beginning of agent evaluation (might be multiple trials)
-  emp::Signal<void(agent_t &)> begin_agent_trial_sig; ///< Triggered at the beginning of an agent trial.
   emp::Signal<void(agent_t &)> record_cur_phenotype_sig;  ///< Triggered at end of agent evaluation. Should do anything necessary to record agent phenotype.
   
+  // Evaluation signals
+  emp::Signal<void(agent_t &)> begin_agent_eval_sig;  ///< Triggered at beginning of agent evaluation (might be multiple trials)
+  emp::Signal<void(agent_t &)> end_agent_eval_sig;  ///< Triggered at beginning of agent evaluation (might be multiple trials)
+
+  emp::Signal<void(agent_t &)> begin_agent_maze_trial_sig; ///< Triggered at the beginning of an agent trial.
+  emp::Signal<void(agent_t &)> do_agent_maze_trial_sig; ///< Triggered at the beginning of an agent trial.
+  emp::Signal<void(agent_t &)> end_agent_maze_trial_sig; ///< Triggered at the beginning of an agent trial.
+
+  emp::Signal<void(agent_t &)> maze_location_sig; ///< When triggered, give SignalGP agent event/signal indicating current location in grid.
+  emp::Signal<void(agent_t &)> do_agent_advance_sig; ///< When triggered, advance SignalGP evaluation hardware
 
   void Evaluate(agent_t & agent) {
-    begin_agent_eval_sig.Trigger(agent);
-    // ... 
+    for (eval_id = 0; eval_id < EVALUATION_CNT; ++eval_id) {
+      begin_agent_eval_sig.Trigger(agent);
+      for (maze_trial_id = 0; maze_trial_id < MAZE_TRIAL_CNT; ++maze_trial_id) {
+        begin_agent_maze_trial_sig.Trigger(agent);
+        do_agent_maze_trial_sig.Trigger(agent);
+        end_agent_maze_trial_sig.Trigger(agent);
+      }
+      end_agent_eval_sig.Trigger(agent);
+    }
   }
-  
+
+  void ResetMaze() {
+    // Randomize large/small reward. 
+
+  }
+
   /// Scratch/test function.
   /// This function exists to test experiment implementation as I code it up.
   void Test() {
@@ -243,10 +299,13 @@ protected:
     std::cout << "=== MAZE ===" << std::endl;
     maze.Print();
   }
+
 public:
 
   Experiment(const TMazeConfig & config) 
-    : update(0), eval_id(0), eval_time(0),
+    : update(0), eval_id(0), maze_trial_id(0),
+      trial_time(0), trial_step(0), 
+      // done_step(false), done_trial(false),
       dom_agent_id(0), phen_cache(0, 0),
       maze()
   { 
@@ -257,11 +316,23 @@ public:
     POP_SIZE = config.POP_SIZE();
     GENERATIONS = config.GENERATIONS();
     ANCESTOR_FPATH = config.ANCESTOR_FPATH();
-    EVALUATION_CNT = config.EVALUATION_CNT();
     // - Selection parameters
     SELECTION_METHOD = config.SELECTION_METHOD();
     TOURNAMENT_SIZE = config.TOURNAMENT_SIZE();
     ELITE_SELECT__ELITE_CNT = config.ELITE_SELECT__ELITE_CNT();
+    // - Evaluation parameters
+    EVALUATION_CNT = config.EVALUATION_CNT();
+    MAZE_TRIAL_EXECUTION_METHOD = config.MAZE_TRIAL_EXECUTION_METHOD();
+    MAZE_TRIAL_CNT = config.MAZE_TRIAL_CNT();
+    AFTER_ACTION__KILL_THREADS = config.AFTER_ACTION__KILL_THREADS();
+    AFTER_ACTION__WIPE_SHARED_MEM = config.AFTER_ACTION__WIPE_SHARED_MEM();
+    AFTER_ACTION__SIGNAL = config.AFTER_ACTION__SIGNAL();
+    AFTER_MAZE_TRIAL__WIPE_SHARED_MEM = config.AFTER_MAZE_TRIAL__WIPE_SHARED_MEM();
+    AFTER_MAZE_TRIAL__CLEAR_FUNC_REF_MODS = config.AFTER_MAZE_TRIAL__CLEAR_FUNC_REF_MODS();
+    POLLING_SENSORS = config.POLLING_SENSORS();
+    MAZE_TRIAL_STEPS = config.MAZE_TRIAL_STEPS();
+    TIME_PER_ACTION = config.TIME_PER_ACTION();
+    MAZE_TRIAL_TIME = config.MAZE_TRIAL_TIME();
     // - T-maze parameters
     MAZE_CORRIDOR_LEN = config.MAZE_CORRIDOR_LEN();
     // - SignalGP function regulation parameters
@@ -788,20 +859,98 @@ void Experiment::DoConfig__Experiment() {
 
   });
   
-  
-  // do_evaluation_sig
-  // do_selection_sig
-  // do_world_update_sig
+    // do_world_update_sig
 
   // NOTE: there may be multiple evaluations for each agent.
   begin_agent_eval_sig.AddAction([this](agent_t & agent) {
     // Reset hardware
     eval_hw->ResetHardware();
-    // TODO: Reset traits  
-    // ... need to know what the task looks like... 
+    // - Reset traits
+    eval_hw->SetTrait(TRAIT_ID__LOC, 0); 
+    eval_hw->SetTrait(TRAIT_ID__FACING, 0);
+    // Reset the maze 
+    maze.RandomizeRewards(*random);
+  });
+
+  begin_agent_maze_trial_sig.AddAction([this](agent_t & agent) {
+    // Reset maze
+    maze.ResetRewards();
+
+    // Reset hardware, but...
+    //  - Do we wipe shared memory between trials? 
+    //  - Do we reset function reference modifiers between trials?
+    eval_hw->ResetHardware(AFTER_MAZE_TRIAL__WIPE_SHARED_MEM, AFTER_MAZE_TRIAL__CLEAR_FUNC_REF_MODS);
+
+    // Configure traits for trail.    
+    eval_hw->SetTrait(TRAIT_ID__LOC, maze.GetStartCellID());  // Set location trait.
+    eval_hw->SetTrait(TRAIT_ID__FACING, TMaze::GetFacing(TMaze::Facing::N)); // Set heading trait.
+    
+    // Trigger START signal
+    maze_location_sig.Trigger(agent);
+  });
+
+  // Configure trial execution
+  switch (MAZE_TRIAL_EXECUTION_METHOD) {
+    case MAZE_TRIAL_EXECUTION_METHOD_ID__CONTINUOUS: {
+      do_agent_maze_trial_sig.AddAction([this](agent_t & agent) {
+        // Do the trial!
+        for (trial_time = 0; trial_time < MAZE_TRIAL_TIME; ++trial_time) {
+          do_agent_advance_sig.Trigger(agent);
+        }
+      });
+      break;
+    }
+    case MAZE_TRIAL_EXECUTION_METHOD_ID__STEPS: {
+      do_agent_maze_trial_sig.AddAction([this](agent_t & agent) {
+        for (trial_step = 0; trial_step < MAZE_TRIAL_STEPS; ++trial_step) {
+          for (trial_time = 0; trial_time < TIME_PER_ACTION; ++trial_time) {
+            do_agent_advance_sig.Trigger(agent); 
+            // TODO: if (action): break
+            if (eval_hw->GetTrait(TRAIT_ID__LAST_ACTION)) {
+              break;      
+            }
+          }
+        }
+      });
+      break;
+    }
+    default: {
+      std::cout << "Unrecognized maze trial execution method (" << MAZE_TRIAL_EXECUTION_METHOD << "). Exiting..." << std::endl;
+      exit(-1);
+    }
+  }
+
+  do_agent_advance_sig.AddAction([this](agent_t & agent) {
+    // Advance the agent
+    eval_hw->SingleProcess();
+
   });
   
+  // end_agent_eval_sig
+  // do_agent_maze_trial_sig
+  // end_agent_maze_trial_sig
+  // maze_location_sig
+  // do_agent_advance_sig
+  
+
+  // Configure selection
+  switch (SELECTION_METHOD) {
+    case SELECTION_METHOD_ID__TOURNAMENT: {
+      do_selection_sig.AddAction([this]() {
+        emp::EliteSelect(*world, ELITE_SELECT__ELITE_CNT, 1);
+        emp::TournamentSelect(*world, TOURNAMENT_SIZE, POP_SIZE - ELITE_SELECT__ELITE_CNT);
+      });
+      break;
+    }
+    default: {
+      std::cout << "Unrecognized selection method (" << SELECTION_METHOD << "). Exiting..." << std::endl;
+      exit(-1);
+    }
+  }
+
+  // Configure world upate. 
   // NOTE: mutate after update; snapshot before update
+
 }
 
 void Experiment::DoConfig__Analysis() {
