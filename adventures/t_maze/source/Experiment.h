@@ -134,6 +134,8 @@ protected:
   size_t SELECTION_METHOD;
   size_t TOURNAMENT_SIZE;
   size_t ELITE_SELECT__ELITE_CNT;
+  // - T-maze group
+  size_t MAZE_CORRIDOR_LEN;
   // - SignalGP function regulation group
   size_t SIMILARITY_ADJUSTMENT_METHOD;
   size_t REF_MOD_ADJUSTMENT_TYPE;
@@ -208,35 +210,38 @@ protected:
   void Test() {
     std::cout << "Testing experiment!" << std::endl;
 
-    std::cout << "Loading test program!" << std::endl;
-    program_t test_prog(inst_lib);
-    std::ifstream test_prog_fstream(ANCESTOR_FPATH);
-    if (!test_prog_fstream.is_open()) {
-      std::cout << "Failed to open test program file (" << ANCESTOR_FPATH << ")!" << std::endl;
-      exit(-1);
-    }
-    test_prog.Load(test_prog_fstream);
-    std::cout << " --- Test program: --- " << std::endl;
-    test_prog.PrintProgramFull();
-    std::cout << " --------------------- " << std::endl;
+    // std::cout << "Loading test program!" << std::endl;
+    // program_t test_prog(inst_lib);
+    // std::ifstream test_prog_fstream(ANCESTOR_FPATH);
+    // if (!test_prog_fstream.is_open()) {
+    //   std::cout << "Failed to open test program file (" << ANCESTOR_FPATH << ")!" << std::endl;
+    //   exit(-1);
+    // }
+    // test_prog.Load(test_prog_fstream);
+    // std::cout << " --- Test program: --- " << std::endl;
+    // test_prog.PrintProgramFull();
+    // std::cout << " --------------------- " << std::endl;
 
-    // 2) Run program!
-    eval_hw->SetProgram(test_prog);
-    eval_hw->ResetHardware();
-    eval_hw->SpawnCore(0, memory_t(), false);
-    // - Print hardware state
-    std::cout << "=== INITIAL STATE ===" << std::endl;
-    eval_hw->PrintState();
-    for (size_t t = 0; t < 32; ++t) {
-      eval_hw->SingleProcess();
-      std::cout << "=== T: " << t << " ===" << std::endl;
-      // Print function modifiers
-      std::cout << "Function modifiers:";
-      for (size_t fID = 0; fID < eval_hw->GetProgram().GetSize(); ++fID) {
-        std::cout << " " << fID << ":" << eval_hw->GetProgram()[fID].GetRefModifier(); 
-      } std::cout << "\n";
-      eval_hw->PrintState();
-    }
+    // // 2) Run program!
+    // eval_hw->SetProgram(test_prog);
+    // eval_hw->ResetHardware();
+    // eval_hw->SpawnCore(0, memory_t(), false);
+    // // - Print hardware state
+    // std::cout << "=== INITIAL STATE ===" << std::endl;
+    // eval_hw->PrintState();
+    // for (size_t t = 0; t < 32; ++t) {
+    //   eval_hw->SingleProcess();
+    //   std::cout << "=== T: " << t << " ===" << std::endl;
+    //   // Print function modifiers
+    //   std::cout << "Function modifiers:";
+    //   for (size_t fID = 0; fID < eval_hw->GetProgram().GetSize(); ++fID) {
+    //     std::cout << " " << fID << ":" << eval_hw->GetProgram()[fID].GetRefModifier(); 
+    //   } std::cout << "\n";
+    //   eval_hw->PrintState();
+    // }
+
+    std::cout << "=== MAZE ===" << std::endl;
+    maze.Print();
   }
 public:
 
@@ -257,6 +262,8 @@ public:
     SELECTION_METHOD = config.SELECTION_METHOD();
     TOURNAMENT_SIZE = config.TOURNAMENT_SIZE();
     ELITE_SELECT__ELITE_CNT = config.ELITE_SELECT__ELITE_CNT();
+    // - T-maze parameters
+    MAZE_CORRIDOR_LEN = config.MAZE_CORRIDOR_LEN();
     // - SignalGP function regulation parameters
     SIMILARITY_ADJUSTMENT_METHOD = config.SIMILARITY_ADJUSTMENT_METHOD();
     REF_MOD_ADJUSTMENT_TYPE = config.REF_MOD_ADJUSTMENT_TYPE();
@@ -287,9 +294,6 @@ public:
     POP_SNAPSHOT_INTERVAL = config.POP_SNAPSHOT_INTERVAL();
     DATA_DIRECTORY = config.DATA_DIRECTORY();
 
-
-
-
     // Create a new random number generator
     random = emp::NewPtr<emp::Random>(RANDOM_SEED);
     
@@ -298,6 +302,9 @@ public:
 
     // Configure the phenotype cache. 
     phen_cache.Resize(POP_SIZE, EVALUATION_CNT); 
+
+    // Configure the maze.
+    maze.Resize(MAZE_CORRIDOR_LEN);
 
     // Make empty instruction/event libraries
     inst_lib = emp::NewPtr<inst_lib_t>();
