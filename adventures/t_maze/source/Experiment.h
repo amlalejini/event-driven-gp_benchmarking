@@ -298,7 +298,7 @@ protected:
 
   // Systematics signals
   emp::Signal<void(size_t)> do_pop_snapshot_sig;      ///< Triggered if we should take a snapshot of the population (as defined by POP_SNAPSHOT_INTERVAL). Should call appropriate functions to take snapshot.
-  emp::Signal<void(agent_t &)> record_cur_phenotype_sig;  ///< Triggered at end of agent evaluation. Should do anything necessary to record agent phenotype.
+  // emp::Signal<void(agent_t &)> record_cur_phenotype_sig;  ///< Triggered at end of agent evaluation. Should do anything necessary to record agent phenotype.
   
   // Evaluation signals
   emp::Signal<void(agent_t &)> begin_agent_eval_sig;  ///< Triggered at beginning of agent evaluation (might be multiple trials)
@@ -452,6 +452,11 @@ public:
 
     // Configure the phenotype cache. 
     phen_cache.Resize(POP_SIZE, EVALUATION_CNT); 
+
+    if (EVALUATION_CNT < 1) {
+      std::cout << "Cannot run experiment with EVALUATION_CNT < 1. Exiting..." << std::endl;
+      exit(-1);
+    }
 
     // Configure the maze.
     maze.Resize(MAZE_CORRIDOR_LEN);
@@ -886,16 +891,13 @@ size_t Experiment::Mutate(agent_t & agent, emp::Random & rnd) {
 
 double Experiment::CalcFitness(agent_t & agent) {
   size_t aID = agent.GetID();
-  size_t eID = 0;
-  // TODO: implement this! (requires me knowing what Phenotype will look like...)
-  // double val = ;
-  // size_t mt = 0;
-  // for (size_t i = 0; i < scores_by_trial.size(); ++i) {
-  //   const double trial_score = scores_by_trial[i];
-  //   if (trial_score < val) { val = trial_score; mt = i; }
-  // }
-  // min_trial = mt;
-  return 0.0;
+  double score = phen_cache.Get(aID, 0).GetScore();
+  // Return the minimum score!
+  for (size_t eID = 1; eID < EVALUATION_CNT; ++eID) {
+    phenotype_t & phen = phen_cache.Get(aID, eID);
+    if (phen.GetScore() < score) score = phen.GetScore();
+  }
+  return score;
 }
 
 // ================== Configuration implementations ==================
@@ -1142,6 +1144,15 @@ void Experiment::DoConfig__Experiment() {
 
   });
 
+  end_agent_maze_trial_sig.AddAction([this](agent_t & agent) {
+    // If you end the trial w/out completing the maze, suffer!
+    if (!eval_hw->GetTrait(TRAIT_ID__DONE)) {
+      const size_t agentID = agent.GetID();
+      phenotype_t & phen = phen_cache.Get(agentID, eval_id);
+      phen.total_penalty_value += MAZE_INCOMPLETE_PENALTY;
+    }
+  });
+
   // Configure trial execution
   switch (MAZE_TRIAL_EXECUTION_METHOD) {
     case MAZE_TRIAL_EXECUTION_METHOD_ID__CONTINUOUS: {
@@ -1188,7 +1199,6 @@ void Experiment::DoConfig__Experiment() {
     // Get the phenotype (to be adjusted)
     const size_t agentID = agent.GetID();
     phenotype_t & phen = phen_cache.Get(agentID, eval_id);
-    // total_maze_completions
 
     // Where is the agent at? 
     const size_t loc = (size_t)eval_hw->GetTrait(TRAIT_ID__LOC);
@@ -1264,6 +1274,13 @@ void Experiment::DoConfig__Experiment() {
     eval_hw->SetTrait(TRAIT_ID__PENALTY_FB, 0);
     eval_hw->SetTrait(TRAIT_ID__REWARD_FB, 0);
         
+  });
+
+  end_agent_eval_sig.AddAction([this](agent_t & agent) {
+    const size_t agentID = agent.GetID();
+    phenotype_t & phen = phen_cache.Get(agentID, eval_id);
+    // End of an evalution, should go ahead and record the score for this evaluation period.
+    phen.score = phen.GetTotalCollectedResourceValue() - phen.GetTotalPenaltyValue();
   });
   
   // end_agent_eval_sig
