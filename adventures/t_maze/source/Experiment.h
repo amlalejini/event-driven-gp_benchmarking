@@ -53,6 +53,9 @@ constexpr size_t TAG_WIDTH = 16;
 constexpr size_t TRAIT_ID__LOC = 0;
 constexpr size_t TRAIT_ID__FACING = 1;
 constexpr size_t TRAIT_ID__LAST_ACTION = 2;
+constexpr size_t TRAIT_ID__REWARD_FB = 3;
+constexpr size_t TRAIT_ID__PENALTY_FB = 4;
+constexpr size_t TRAIT_ID__REWARD_COLLECTED = 5; 
 
 constexpr size_t ACTION_ID__NONE = 0;
 constexpr size_t ACTION_ID__FORWARD = 1;
@@ -301,8 +304,10 @@ protected:
     //   eval_hw->PrintState();
     // }
 
+
     std::cout << "=== MAZE ===" << std::endl;
     maze.Print();
+
   }
 
 public:
@@ -461,6 +466,10 @@ public:
   static void Inst_Call(hardware_t & hw, const inst_t & inst);      
   static void Inst_Fork(hardware_t & hw, const inst_t & inst);      
   static void Inst_Terminate(hardware_t & hw, const inst_t & inst); 
+  // -- Movement instructions --
+  void Inst_Forward(hardware_t & hw, const inst_t & inst);
+  void Inst_RotCW(hardware_t & hw, const inst_t & inst);
+  void Inst_RotCCW(hardware_t & hw, const inst_t & inst);
 
 };
 
@@ -479,6 +488,41 @@ void Experiment::Inst_Terminate(hardware_t & hw, const inst_t & inst)  {
   exec_stk_t & core = hw.GetCurCore();
   core.resize(0);
 }
+
+void Experiment::Inst_RotCW(hardware_t & hw, const inst_t & inst) {
+  if (hw.GetTrait(TRAIT_ID__LAST_ACTION)) return; // Not allowed to do two actions per time step.
+  hw.SetTrait(TRAIT_ID__FACING, emp::Mod(hw.GetTrait(TRAIT_ID__FACING) + 1, TMaze::NUM_DIRECTIONS));
+  hw.SetTrait(TRAIT_ID__LAST_ACTION, ACTION_ID__ROT_CW);
+}
+
+void Experiment::Inst_RotCCW(hardware_t & hw, const inst_t & inst) {
+  if (hw.GetTrait(TRAIT_ID__LAST_ACTION)) return; // Not allowed to do two actions per time step.
+  hw.SetTrait(TRAIT_ID__FACING, emp::Mod(hw.GetTrait(TRAIT_ID__FACING) - 1, TMaze::NUM_DIRECTIONS));
+  hw.SetTrait(TRAIT_ID__LAST_ACTION, ACTION_ID__ROT_CCW);
+}
+
+void Experiment::Inst_Forward(hardware_t & hw, const inst_t & inst) {
+  if (hw.GetTrait(TRAIT_ID__LAST_ACTION)) return; // Not allowed to do two actions per time step.
+  const TMaze::Facing facing = TMaze::GetFacing(eval_hw->GetTrait(TRAIT_ID__FACING));
+  const size_t maze_loc = eval_hw->GetTrait(TRAIT_ID__LOC);
+  const TMaze::Cell & cur_cell = maze.GetCell(maze_loc);
+
+  // Possibilities when moving foward:
+  // 1) There is a neighboring cell in the agent's current facing.
+  //  - In this case, the movement succeeds, and we update the agent's current location. 
+  // 2) There is not a neighboring cell in the agent's current facing. 
+  //  - In this case, the movement fails, and the agent collides w/the wall (incurring a penalty). 
+  
+  if (cur_cell.HasNeighbor(facing)) { 
+    // These is a cell to be moved to. 
+    hw.SetTrait(TRAIT_ID__LOC, cur_cell.GetNeighborID(facing));
+  } else {
+    // Collision!
+    hw.SetTrait(TRAIT_ID__PENALTY_FB, 1);
+  }
+  hw.SetTrait(TRAIT_ID__LAST_ACTION, ACTION_ID__FORWARD);
+}
+
 
 // ================== Run experiment implementations ==================
 void Experiment::Run() {
@@ -788,32 +832,13 @@ void Experiment::DoConfig__Hardware() {
   inst_lib->AddInst("Terminate", Inst_Terminate, 0, "Kill current thread.");
 
   // TODO: more experiment-specific instructions
-  
-  // Similarity adjustment method defines the way we apply the function reference 
-  // modifier when a tag similarity against a function is being calculated.
-  switch (SIMILARITY_ADJUSTMENT_METHOD) {
-    case SIMILARITY_ADJUSTMENT_METHOD_ID__ADD: {
-      // When adjusting similarity calculation, do so by adding function reference modifier.
-      eval_hw->SetBaseFuncRefMod(0.0);
-      eval_hw->SetFuncRefModifier([](double base_sim, const function_t & function) {
-        return base_sim + function.GetRefModifier();
-      });
-      break;
-    }
-    case SIMILARITY_ADJUSTMENT_METHOD_ID__MULT: {
-      // When adjusting similarity calculation, do so by multiplying function reference modifier.
-      eval_hw->SetBaseFuncRefMod(1.0);
-      eval_hw->SetFuncRefModifier([](double base_sim, const function_t & function) {
-        return base_sim * function.GetRefModifier();
-      });
-      break;
-    }
-    default: {
-      std::cout << "Unrecognized SIMILARITY_ADJUSTMENT_METHOD (" << SIMILARITY_ADJUSTMENT_METHOD << "). Exiting..." << std::endl;
-      exit(-1);
-    }
-  }
+  // Actuation instructions
+  // - Forward
+  // inst_lib->AddInst("Forward", )
+  // - RotCW
+  // - RotCCW
 
+  // Regulatory instructions
   switch(REF_MOD_ADJUSTMENT_TYPE) {
     case REF_MOD_ADJUSTMENT_TYPE_ID__ADD: {
       // When applying regulation to a function's reference modifier, do so by adding/subtracting ref mod adjustment value.
@@ -872,6 +897,31 @@ void Experiment::DoConfig__Hardware() {
     }
     default: {
       std::cout << "Unrecognized REF_MOD_ADJUSTMENT_TYPE (" << REF_MOD_ADJUSTMENT_TYPE << "). Exiting..." << std::endl;
+      exit(-1);
+    }
+  }
+  
+  // Similarity adjustment method defines the way we apply the function reference 
+  // modifier when a tag similarity against a function is being calculated.
+  switch (SIMILARITY_ADJUSTMENT_METHOD) {
+    case SIMILARITY_ADJUSTMENT_METHOD_ID__ADD: {
+      // When adjusting similarity calculation, do so by adding function reference modifier.
+      eval_hw->SetBaseFuncRefMod(0.0);
+      eval_hw->SetFuncRefModifier([](double base_sim, const function_t & function) {
+        return base_sim + function.GetRefModifier();
+      });
+      break;
+    }
+    case SIMILARITY_ADJUSTMENT_METHOD_ID__MULT: {
+      // When adjusting similarity calculation, do so by multiplying function reference modifier.
+      eval_hw->SetBaseFuncRefMod(1.0);
+      eval_hw->SetFuncRefModifier([](double base_sim, const function_t & function) {
+        return base_sim * function.GetRefModifier();
+      });
+      break;
+    }
+    default: {
+      std::cout << "Unrecognized SIMILARITY_ADJUSTMENT_METHOD (" << SIMILARITY_ADJUSTMENT_METHOD << "). Exiting..." << std::endl;
       exit(-1);
     }
   }
@@ -956,7 +1006,9 @@ void Experiment::DoConfig__Experiment() {
     // Configure traits for trail.    
     eval_hw->SetTrait(TRAIT_ID__LOC, maze.GetStartCellID());  // Set location trait.
     eval_hw->SetTrait(TRAIT_ID__FACING, TMaze::GetFacing(TMaze::Facing::N)); // Set heading trait.
-    
+    eval_hw->SetTrait(TRAIT_ID__REWARD_FB, 0);
+    eval_hw->SetTrait(TRAIT_ID__PENALTY_FB, 0);
+    eval_hw->SetTrait(TRAIT_ID__REWARD_COLLECTED, 0);
     // Trigger START signal
     maze_location_sig.Trigger(agent);
   });
@@ -998,6 +1050,13 @@ void Experiment::DoConfig__Experiment() {
   });
 
   maze_location_sig.AddAction([this](agent_t & agent) {
+    // Where is the agent at? 
+    const TMaze::CellType type = TMaze::GetCellType(eval_hw->GetTrait(TRAIT_ID__LOC));
+    const size_t type_id = (size_t)eval_hw->GetTrait(TRAIT_ID__LOC);
+    const double penalty_fb = eval_hw->GetTrait(TRAIT_ID__PENALTY_FB);
+    const double reward_fb = eval_hw->GetTrait(TRAIT_ID__REWARD_FB); 
+    // TODO: finish this up.
+    // Queue event
     // eval_hw->
   });
   

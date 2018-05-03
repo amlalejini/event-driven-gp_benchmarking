@@ -38,6 +38,8 @@ class TMaze {
       return val;
     }
 
+
+
     static constexpr CellType GetCellType(size_t i) {
       emp_assert(i < NUM_CELL_TYPES); return static_cast<CellType>(i);
     }
@@ -78,6 +80,15 @@ class TMaze {
       const std::unordered_map<Facing, size_t> & GetNeighbors() const { return neighbors; }
       CellType GetType() const { return type; }
       double GetValue() const { return value; }
+
+      bool HasNeighbor(Facing dir) const {
+        return emp::Has(neighbors, dir);
+      }
+
+      size_t GetNeighborID(Facing dir) const {
+        emp_assert(HasNeighbor(dir));
+        return neighbors.at(dir);
+      }
 
     };
 
