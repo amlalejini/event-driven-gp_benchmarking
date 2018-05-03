@@ -210,6 +210,8 @@ protected:
  // - Evaluation group
   size_t EVALUATION_CNT;
   size_t MAZE_TRIAL_CNT;
+  size_t REWARD_SWITCH_TRIAL_MIN; 
+  size_t REWARD_SWITCH_TRIAL_MAX; 
   size_t MAZE_TRIAL_EXECUTION_METHOD;
   bool AFTER_ACTION__RESET;
   bool AFTER_ACTION__WIPE_SHARED_MEM;
@@ -315,10 +317,18 @@ protected:
   void Evaluate(agent_t & agent) {
     for (eval_id = 0; eval_id < EVALUATION_CNT; ++eval_id) {
       begin_agent_eval_sig.Trigger(agent);
+      size_t switch_clock = 0;
+      size_t switch_time = random->GetUInt(REWARD_SWITCH_TRIAL_MIN, REWARD_SWITCH_TRIAL_MAX);
       for (maze_trial_id = 0; maze_trial_id < MAZE_TRIAL_CNT; ++maze_trial_id) {
+        if (switch_clock >= switch_time) { 
+          maze.SwitchRewards();
+          switch_time = random->GetUInt(REWARD_SWITCH_TRIAL_MIN, REWARD_SWITCH_TRIAL_MAX);
+          switch_clock = 0; 
+        } 
         begin_agent_maze_trial_sig.Trigger(agent);
         do_agent_maze_trial_sig.Trigger(agent);
         end_agent_maze_trial_sig.Trigger(agent);
+        ++switch_time;
       }
       end_agent_eval_sig.Trigger(agent);
     }
@@ -397,6 +407,8 @@ public:
     EVALUATION_CNT = config.EVALUATION_CNT();
     MAZE_TRIAL_EXECUTION_METHOD = config.MAZE_TRIAL_EXECUTION_METHOD();
     MAZE_TRIAL_CNT = config.MAZE_TRIAL_CNT();
+    REWARD_SWITCH_TRIAL_MIN = config.REWARD_SWITCH_TRIAL_MIN();
+    REWARD_SWITCH_TRIAL_MAX = config.REWARD_SWITCH_TRIAL_MAX();
     AFTER_ACTION__RESET = config.AFTER_ACTION__RESET();
     AFTER_ACTION__WIPE_SHARED_MEM = config.AFTER_ACTION__WIPE_SHARED_MEM();
     AFTER_ACTION__CLEAR_FUNC_REF_MODS = config.AFTER_ACTION__CLEAR_FUNC_REF_MODS();
@@ -1163,10 +1175,12 @@ void Experiment::DoConfig__Experiment() {
         // Do the trial!
         for (trial_time = 0; trial_time < MAZE_TRIAL_TIME; ++trial_time) {
           do_agent_advance_sig.Trigger(agent);
+          
           if (eval_hw->GetTrait(TRAIT_ID__LAST_ACTION)) {
             after_agent_action_sig.Trigger(agent);
             if (eval_hw->GetTrait(TRAIT_ID__DONE)) break;
           }
+
         }
       });
       break;
@@ -1205,7 +1219,7 @@ void Experiment::DoConfig__Experiment() {
     // Where is the agent at? 
     const size_t loc = (size_t)eval_hw->GetTrait(TRAIT_ID__LOC);
     TMaze::Cell & cell = maze.GetCell(loc);
-    const size_t type_id = TMaze::GetCellType(cell.GetType());
+    // const size_t type_id = TMaze::GetCellType(cell.GetType());
     const double cell_value = cell.GetValue();
     const size_t last_action_id = (size_t)eval_hw->GetTrait(TRAIT_ID__LAST_ACTION);
 
@@ -1215,7 +1229,8 @@ void Experiment::DoConfig__Experiment() {
       eval_hw->SetTrait(TRAIT_ID__REWARD_COLLECTED, 1);
       phen.total_resource_collections++;
       phen.total_collected_resource_value += cell_value;
-      maze.ClearRewards();
+      // maze.ClearRewards();
+      maze.ClearCellValues();
     }
 
     // Did the agent finish the maze?
@@ -1226,12 +1241,13 @@ void Experiment::DoConfig__Experiment() {
 
     // Gather agent's reward/penalty feedback
     const double penalty_fb = eval_hw->GetTrait(TRAIT_ID__PENALTY_FB);
-    const double reward_fb = eval_hw->GetTrait(TRAIT_ID__REWARD_FB); 
+    // const double reward_fb = eval_hw->GetTrait(TRAIT_ID__REWARD_FB); 
 
     // Incur penalty for collision!
     if (penalty_fb > 0) {
       phen.total_collisions++;
-      phen.total_penalty_value += COLLISION_PENALTY;
+      // phen.total_penalty_value += COLLISION_PENALTY;
+      eval_hw->SetTrait(TRAIT_ID__DONE, 1);
     }
     
     switch (last_action_id) {

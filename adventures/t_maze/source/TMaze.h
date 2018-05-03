@@ -106,6 +106,8 @@ class TMaze {
     double small_reward_val;
     double large_reward_val;
 
+    double base_value; ///< Base value of all cells except reward cells.
+
     void BuildMaze() {
       size_t maze_id = 0;
 
@@ -173,14 +175,14 @@ class TMaze {
     }
 
   public:
-    TMaze(size_t _corridor_len = 3, double _s_reward_val = 1, double _l_reward_val = 2) 
+    TMaze(size_t _corridor_len = 3, double _s_reward_val = 1, double _l_reward_val = 2, double _b_val = 0) 
       : corridor_len(_corridor_len), 
         maze((3 * corridor_len) + 4),
         reward_cell_ids(2),
         large_reward_cell_id(0),
         start_cell_id(0),
         junction_cell_id(0),
-        small_reward_val(_s_reward_val), large_reward_val(_l_reward_val)
+        small_reward_val(_s_reward_val), large_reward_val(_l_reward_val), base_value(_b_val)
     { 
       BuildMaze(); 
     }
@@ -196,6 +198,7 @@ class TMaze {
 
     double GetSmallRewardValue() const { return small_reward_val; }
     double GetLargeRewardValue() const { return large_reward_val; }
+    double GetBaseValue() const { return base_value; }
 
     Cell & GetCell(size_t id) {
       emp_assert(id < maze.size());
@@ -204,6 +207,7 @@ class TMaze {
 
     void SetLargeRewardValue(double val) { large_reward_val = val; }
     void SetSmallRewardValue(double val) { small_reward_val = val; }
+    void SetBaseValue(double val) { base_value = val; }
 
     void Resize(size_t _corridor_len) {
       corridor_len = _corridor_len;
@@ -214,7 +218,7 @@ class TMaze {
 
     void ResetRewards() {
        // Zero out e'rybody's values! 
-      for (size_t i = 0; i < maze.size(); ++i) { maze[i].value = 0; }
+      for (size_t i = 0; i < maze.size(); ++i) { maze[i].value = base_value; }
       // Set reward cell values. 
       for (size_t r = 0; r < reward_cell_ids.size(); ++r) {
         const size_t rID = reward_cell_ids[r];
@@ -228,8 +232,13 @@ class TMaze {
       }
     }
 
+    void ClearCellValues() {
+      // Zero out e'rybody's values! 
+      for (size_t i = 0; i < maze.size(); ++i) { maze[i].value = 0; }
+    }
+
     void RandomizeRewards(emp::Random & rnd) {
-      large_reward_cell_id = rnd.GetUInt(reward_cell_ids.size());
+      large_reward_cell_id = reward_cell_ids[rnd.GetUInt(reward_cell_ids.size())];
       ResetRewards();
     }
 
