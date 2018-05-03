@@ -139,18 +139,18 @@ public:
         score(0)
     { ; }
 
-    void GetTotalCollisions() const { return total_collisions; }
-    void GetTotalMazeCompletions() const { return total_maze_completions; }
-    void GetTotalResourceCollections() const { return total_resource_collections; }
-    void GetTotalCollectedResourceValue() const { return total_collected_resource_value; }
-    void GetTotalPenaltyValue() const { return total_penalty_value; }
-    void GetTotalRotCW() const { return total_rotcw; }
-    void GetTotalRotCCW() const { return total_rotccw; }
-    void GetTotalForward() const { return total_forward; }
-    void GetTotalActions() const { return total_actions; }
-    void GetScore() const { return score; }
+    size_t GetTotalCollisions() const { return total_collisions; }
+    size_t GetTotalMazeCompletions() const { return total_maze_completions; }
+    size_t GetTotalResourceCollections() const { return total_resource_collections; }
+    double GetTotalCollectedResourceValue() const { return total_collected_resource_value; }
+    double GetTotalPenaltyValue() const { return total_penalty_value; }
+    size_t GetTotalRotCW() const { return total_rotcw; }
+    size_t GetTotalRotCCW() const { return total_rotccw; }
+    size_t GetTotalForward() const { return total_forward; }
+    size_t GetTotalActions() const { return total_actions; }
+    double GetScore() const { return score; }
 
-    Reset() {
+    void Reset() {
       total_collisions = 0;
       total_maze_completions = 0;
       total_resource_collections = 0;
