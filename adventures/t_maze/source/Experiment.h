@@ -114,7 +114,55 @@ public:
 
   /// Phenotype of agents being evolved
   struct Phenotype {
-    // TODO: Fill out phenotype struct.
+    size_t total_collisions;
+    size_t total_maze_completions;
+    size_t total_resource_collections;
+    double total_collected_resource_value;
+    double total_penalty_value;
+    size_t total_rotcw;
+    size_t total_rotccw;
+    size_t total_forward;
+    size_t total_actions;
+
+    double score;
+
+    Phenotype()
+      : total_collisions(0),
+        total_maze_completions(0),
+        total_resource_collections(0),
+        total_collected_resource_value(0),
+        total_penalty_value(0),
+        total_rotcw(0),
+        total_rotccw(0),
+        total_forward(0),
+        total_actions(0),
+        score(0)
+    { ; }
+
+    void GetTotalCollisions() const { return total_collisions; }
+    void GetTotalMazeCompletions() const { return total_maze_completions; }
+    void GetTotalResourceCollections() const { return total_resource_collections; }
+    void GetTotalCollectedResourceValue() const { return total_collected_resource_value; }
+    void GetTotalPenaltyValue() const { return total_penalty_value; }
+    void GetTotalRotCW() const { return total_rotcw; }
+    void GetTotalRotCCW() const { return total_rotccw; }
+    void GetTotalForward() const { return total_forward; }
+    void GetTotalActions() const { return total_actions; }
+    void GetScore() const { return score; }
+
+    Reset() {
+      total_collisions = 0;
+      total_maze_completions = 0;
+      total_resource_collections = 0;
+      total_collected_resource_value = 0;
+      total_penalty_value = 0;
+      total_rotcw = 0;
+      total_rotccw = 0;
+      total_forward = 0;
+      total_actions = 0;
+      score = 0;
+    }
+
   };
 
   class PhenotypeCache {
@@ -1138,6 +1186,7 @@ void Experiment::DoConfig__Experiment() {
     // Did agent collect a reward?
     if (cell.GetType() == TMaze::CellType::REWARD) {
       eval_hw->SetTrait(TRAIT_ID__REWARD_FB, cell_value);
+      eval_hw->SetTrait(TRAIT_ID__REWARD_COLLECTED, 1);
       maze.ClearRewards();
     }
 
@@ -1151,8 +1200,7 @@ void Experiment::DoConfig__Experiment() {
     std::cout << "  cell value: " << cell_value << std::endl;
 
     // TODO: Adjust fitness/phenotype
-  
-              
+     
   });
 
   after_agent_action_sig.AddAction([this](agent_t & agent) {
