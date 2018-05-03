@@ -202,6 +202,9 @@ class TMaze {
       return maze[id];
     }
 
+    void SetLargeRewardValue(double val) { large_reward_val = val; }
+    void SetSmallRewardValue(double val) { small_reward_val = val; }
+
     void Resize(size_t _corridor_len) {
       corridor_len = _corridor_len;
       maze.clear();

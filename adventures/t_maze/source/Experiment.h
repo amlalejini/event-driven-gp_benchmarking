@@ -174,6 +174,8 @@ protected:
   size_t MAZE_TRIAL_TIME;
   // - T-maze group
   size_t MAZE_CORRIDOR_LEN;
+  double MAZE_SMALL_REWARD_VALUE;
+  double MAZE_LARGE_REWARD_VALUE;
   size_t MAZE_CELL_TAG_GENERATION_METHOD;
   std::string MAZE_CELL_TAG_FPATH;
   // - SignalGP function regulation group
@@ -300,7 +302,7 @@ protected:
 
     // 2) Run program!
     maze.ResetRewards();
-
+    maze.SwitchRewards();
     eval_hw->SetProgram(test_prog);
     eval_hw->ResetHardware();
 
@@ -355,6 +357,8 @@ public:
     MAZE_TRIAL_TIME = config.MAZE_TRIAL_TIME();
     // - T-maze parameters
     MAZE_CORRIDOR_LEN = config.MAZE_CORRIDOR_LEN();
+    MAZE_SMALL_REWARD_VALUE = config.MAZE_SMALL_REWARD_VALUE();
+    MAZE_LARGE_REWARD_VALUE = config.MAZE_LARGE_REWARD_VALUE();
     MAZE_CELL_TAG_GENERATION_METHOD = config.MAZE_CELL_TAG_GENERATION_METHOD();
     MAZE_CELL_TAG_FPATH = config.MAZE_CELL_TAG_FPATH();
     // - SignalGP function regulation parameters
@@ -398,6 +402,8 @@ public:
 
     // Configure the maze.
     maze.Resize(MAZE_CORRIDOR_LEN);
+    maze.SetLargeRewardValue(MAZE_LARGE_REWARD_VALUE);
+    maze.SetSmallRewardValue(MAZE_SMALL_REWARD_VALUE);
 
     // Configure maze tags
     switch (MAZE_CELL_TAG_GENERATION_METHOD) {
