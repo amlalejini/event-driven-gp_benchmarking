@@ -162,8 +162,9 @@ protected:
   size_t EVALUATION_CNT;
   size_t MAZE_TRIAL_CNT;
   size_t MAZE_TRIAL_EXECUTION_METHOD;
-  bool AFTER_ACTION__KILL_THREADS;
+  bool AFTER_ACTION__RESET;
   bool AFTER_ACTION__WIPE_SHARED_MEM;
+  bool AFTER_ACTION__CLEAR_FUNC_REF_MODS;
   bool AFTER_ACTION__SIGNAL;
   bool AFTER_MAZE_TRIAL__WIPE_SHARED_MEM;
   bool AFTER_MAZE_TRIAL__CLEAR_FUNC_REF_MODS;
@@ -274,35 +275,46 @@ protected:
   void Test() {
     std::cout << "Testing experiment!" << std::endl;
 
-    // std::cout << "Loading test program!" << std::endl;
-    // program_t test_prog(inst_lib);
-    // std::ifstream test_prog_fstream(ANCESTOR_FPATH);
-    // if (!test_prog_fstream.is_open()) {
-    //   std::cout << "Failed to open test program file (" << ANCESTOR_FPATH << ")!" << std::endl;
-    //   exit(-1);
-    // }
-    // test_prog.Load(test_prog_fstream);
-    // std::cout << " --- Test program: --- " << std::endl;
-    // test_prog.PrintProgramFull();
-    // std::cout << " --------------------- " << std::endl;
+    std::cout << "Loading test program!" << std::endl;
+    program_t test_prog(inst_lib);
+    std::ifstream test_prog_fstream(ANCESTOR_FPATH);
+    if (!test_prog_fstream.is_open()) {
+      std::cout << "Failed to open test program file (" << ANCESTOR_FPATH << ")!" << std::endl;
+      exit(-1);
+    }
+    test_prog.Load(test_prog_fstream);
+    std::cout << " --- Test program: --- " << std::endl;
+    test_prog.PrintProgramFull();
+    std::cout << " --------------------- " << std::endl;
+    Agent test_hero(test_prog);
 
-    // // 2) Run program!
-    // eval_hw->SetProgram(test_prog);
-    // eval_hw->ResetHardware();
-    // eval_hw->SpawnCore(0, memory_t(), false);
-    // // - Print hardware state
-    // std::cout << "=== INITIAL STATE ===" << std::endl;
-    // eval_hw->PrintState();
-    // for (size_t t = 0; t < 32; ++t) {
-    //   eval_hw->SingleProcess();
-    //   std::cout << "=== T: " << t << " ===" << std::endl;
-    //   // Print function modifiers
-    //   std::cout << "Function modifiers:";
-    //   for (size_t fID = 0; fID < eval_hw->GetProgram().GetSize(); ++fID) {
-    //     std::cout << " " << fID << ":" << eval_hw->GetProgram()[fID].GetRefModifier(); 
-    //   } std::cout << "\n";
-    //   eval_hw->PrintState();
-    // }
+    // 2) Run program!
+    maze.ResetRewards();
+
+    eval_hw->SetProgram(test_prog);
+    eval_hw->ResetHardware();
+
+    eval_hw->SetTrait(TRAIT_ID__LOC, maze.GetStartCellID());  // Set location trait.
+    eval_hw->SetTrait(TRAIT_ID__FACING, TMaze::GetFacing(TMaze::Facing::N)); // Set heading trait.
+    eval_hw->SetTrait(TRAIT_ID__REWARD_FB, 0);
+    eval_hw->SetTrait(TRAIT_ID__PENALTY_FB, 0);
+    eval_hw->SetTrait(TRAIT_ID__REWARD_COLLECTED, 0);
+
+    maze_location_sig.Trigger(test_hero);
+
+    // - Print hardware state
+    std::cout << "=== INITIAL STATE ===" << std::endl;
+    eval_hw->PrintState();
+    for (size_t t = 0; t < 64; ++t) {
+      eval_hw->SingleProcess();
+      std::cout << "=== T: " << t << " ===" << std::endl;
+      // Print function modifiers
+      std::cout << "Function modifiers:";
+      for (size_t fID = 0; fID < eval_hw->GetProgram().GetSize(); ++fID) {
+        std::cout << " " << fID << ":" << eval_hw->GetProgram()[fID].GetRefModifier(); 
+      } std::cout << "\n";
+      eval_hw->PrintState();
+    }
 
 
     std::cout << "=== MAZE ===" << std::endl;
@@ -334,8 +346,9 @@ public:
     EVALUATION_CNT = config.EVALUATION_CNT();
     MAZE_TRIAL_EXECUTION_METHOD = config.MAZE_TRIAL_EXECUTION_METHOD();
     MAZE_TRIAL_CNT = config.MAZE_TRIAL_CNT();
-    AFTER_ACTION__KILL_THREADS = config.AFTER_ACTION__KILL_THREADS();
+    AFTER_ACTION__RESET = config.AFTER_ACTION__RESET();
     AFTER_ACTION__WIPE_SHARED_MEM = config.AFTER_ACTION__WIPE_SHARED_MEM();
+    AFTER_ACTION__CLEAR_FUNC_REF_MODS = config.AFTER_ACTION__CLEAR_FUNC_REF_MODS();
     AFTER_ACTION__SIGNAL = config.AFTER_ACTION__SIGNAL();
     AFTER_MAZE_TRIAL__WIPE_SHARED_MEM = config.AFTER_MAZE_TRIAL__WIPE_SHARED_MEM();
     AFTER_MAZE_TRIAL__CLEAR_FUNC_REF_MODS = config.AFTER_MAZE_TRIAL__CLEAR_FUNC_REF_MODS();
@@ -421,6 +434,17 @@ public:
     // Configure hardware and instruction/event libraries.
     DoConfig__Hardware();
 
+    switch (RUN_MODE) {
+      case RUN_ID__EXP: {
+        DoConfig__Experiment();
+        break;
+      }
+      case RUN_ID__ANALYSIS: {
+        DoConfig__Analysis();
+        break;
+      }
+    }
+
     Test();
   }
 
@@ -470,6 +494,10 @@ public:
   void Inst_Forward(hardware_t & hw, const inst_t & inst);
   void Inst_RotCW(hardware_t & hw, const inst_t & inst);
   void Inst_RotCCW(hardware_t & hw, const inst_t & inst);
+
+  // === SignalGP event handlers/dispatchers ===
+  static void EventDispatch__MazeLocation(hardware_t & hw, const event_t & event);
+  static void EventHandler__MazeLocation(hardware_t & hw, const event_t & event);
 
 };
 
@@ -523,6 +551,16 @@ void Experiment::Inst_Forward(hardware_t & hw, const inst_t & inst) {
   hw.SetTrait(TRAIT_ID__LAST_ACTION, ACTION_ID__FORWARD);
 }
 
+// ================== Event definition implementations ==================
+void Experiment::EventDispatch__MazeLocation(hardware_t & hw, const event_t & event) {
+  std::cout << "->Dispatching maze loc event, queuing it up!" << std::endl;
+  hw.QueueEvent(event); // self-queue the event
+}
+
+void Experiment::EventHandler__MazeLocation(hardware_t & hw, const event_t & event) {
+  std::cout << "->Handling maze loc event, spawn a core!" << std::endl;
+  hw.SpawnCore(event.affinity, hw.GetMinBindThresh(), event.msg, false, true);
+}
 
 // ================== Run experiment implementations ==================
 void Experiment::Run() {
@@ -831,12 +869,19 @@ void Experiment::DoConfig__Hardware() {
   inst_lib->AddInst("Fork", Inst_Fork, 0, "Fork a new thread. Local memory contents of callee are loaded into forked thread's input memory.");
   inst_lib->AddInst("Terminate", Inst_Terminate, 0, "Kill current thread.");
 
-  // TODO: more experiment-specific instructions
   // Actuation instructions
   // - Forward
-  // inst_lib->AddInst("Forward", )
+  inst_lib->AddInst("Forward", [this](hardware_t & hw, const inst_t & inst) {
+    this->Inst_Forward(hw, inst);
+  }, 0, "If the agent can move forward, move the agent forward in the maze. Otherwise, collision!");
   // - RotCW
+  inst_lib->AddInst("RotCW", [this](hardware_t & hw, const inst_t & inst) {
+    this->Inst_RotCW(hw, inst);
+  }, 0, "Rotate agent clockwise.");
   // - RotCCW
+  inst_lib->AddInst("RotCCW", [this](hardware_t & hw, const inst_t & inst) {
+    this->Inst_RotCCW(hw, inst);
+  }, 0, "Rotate agent counter-clockwise.");
 
   // Regulatory instructions
   switch(REF_MOD_ADJUSTMENT_TYPE) {
@@ -926,6 +971,10 @@ void Experiment::DoConfig__Hardware() {
     }
   }
 
+  // Setup the event library.
+  event_lib->AddEvent("MazeLocation", EventHandler__MazeLocation, "Maze location event. Triggered when agent moves onto new location.");
+  event_lib->RegisterDispatchFun("MazeLocation", EventDispatch__MazeLocation);
+
   eval_hw->SetMinBindThresh(SGP_HW_MIN_BIND_THRESH);
   eval_hw->SetMaxCores(SGP_HW_MAX_CORES);
   eval_hw->SetMaxCallDepth(SGP_HW_MAX_CALL_DEPTH);
@@ -1003,14 +1052,22 @@ void Experiment::DoConfig__Experiment() {
     //  - Do we reset function reference modifiers between trials?
     eval_hw->ResetHardware(AFTER_MAZE_TRIAL__WIPE_SHARED_MEM, AFTER_MAZE_TRIAL__CLEAR_FUNC_REF_MODS);
 
+    TMaze::Cell & start_cell = maze.GetCell(maze.GetStartCellID());
+
     // Configure traits for trail.    
     eval_hw->SetTrait(TRAIT_ID__LOC, maze.GetStartCellID());  // Set location trait.
     eval_hw->SetTrait(TRAIT_ID__FACING, TMaze::GetFacing(TMaze::Facing::N)); // Set heading trait.
     eval_hw->SetTrait(TRAIT_ID__REWARD_FB, 0);
     eval_hw->SetTrait(TRAIT_ID__PENALTY_FB, 0);
     eval_hw->SetTrait(TRAIT_ID__REWARD_COLLECTED, 0);
+    
     // Trigger START signal
     maze_location_sig.Trigger(agent);
+    memory_t mem;
+    mem[EVENT_DATA_ID__VALUE] = start_cell.GetValue();
+    mem[EVENT_DATA_ID__PENALTY_FB] = 0;
+    eval_hw->TriggerEvent("MazeLocation", maze_tags[TMaze::GetCellType(TMaze::CellType::START)], mem);
+
   });
 
   // Configure trial execution
@@ -1027,14 +1084,36 @@ void Experiment::DoConfig__Experiment() {
     case MAZE_TRIAL_EXECUTION_METHOD_ID__STEPS: {
       do_agent_maze_trial_sig.AddAction([this](agent_t & agent) {
         for (trial_step = 0; trial_step < MAZE_TRIAL_STEPS; ++trial_step) {
+          
+          // Run step until action or until step-time runs out
           for (trial_time = 0; trial_time < TIME_PER_ACTION; ++trial_time) {
             do_agent_advance_sig.Trigger(agent); 
-            // TODO: if (action): break ==> kill threads, wipe memory, etc? 
-            if (eval_hw->GetTrait(TRAIT_ID__LAST_ACTION)) {
-              break;      
-            }
+            if (eval_hw->GetTrait(TRAIT_ID__LAST_ACTION)) { break; }
+          } // End single step
+
+          // Trigger maze location
+          maze_location_sig.Trigger(agent);
+              
+          if (AFTER_ACTION__RESET) {
+            eval_hw->ResetHardware(AFTER_ACTION__WIPE_SHARED_MEM, AFTER_ACTION__CLEAR_FUNC_REF_MODS);
           }
-        }
+
+          if (AFTER_ACTION__SIGNAL) {
+            TMaze::Cell & cell = maze.GetCell(eval_hw->GetTrait(TRAIT_ID__LOC));
+            memory_t mem;
+            mem[EVENT_DATA_ID__VALUE] = cell.GetValue();
+            mem[EVENT_DATA_ID__PENALTY_FB] = eval_hw->GetTrait(TRAIT_ID__PENALTY_FB);
+            eval_hw->TriggerEvent("MazeLocation", maze_tags[TMaze::GetCellType(cell.GetType())], mem);
+          }
+
+          // After action clean-up
+          eval_hw->SetTrait(TRAIT_ID__LAST_ACTION, ACTION_ID__NONE);
+          eval_hw->SetTrait(TRAIT_ID__PENALTY_FB, 0);
+          eval_hw->SetTrait(TRAIT_ID__REWARD_FB, 0);
+        
+        } // End trial 
+      
+      
       });
       break;
     }
@@ -1049,21 +1128,47 @@ void Experiment::DoConfig__Experiment() {
     eval_hw->SingleProcess();
   });
 
+  // Gets triggered when an agent goes to a new location... TODO: finish, incorporate memory wiping, etc
   maze_location_sig.AddAction([this](agent_t & agent) {
+    std::cout << "-- Maze location signal --" << std::endl;
+
     // Where is the agent at? 
-    const TMaze::CellType type = TMaze::GetCellType(eval_hw->GetTrait(TRAIT_ID__LOC));
-    const size_t type_id = (size_t)eval_hw->GetTrait(TRAIT_ID__LOC);
+    const size_t loc = (size_t)eval_hw->GetTrait(TRAIT_ID__LOC);
+    TMaze::Cell & cell = maze.GetCell(loc);
+    const size_t type_id = TMaze::GetCellType(cell.GetType());
+    const double cell_value = cell.GetValue();
+
+    // Did agent collect a reward?
+    if (cell.GetType() == TMaze::CellType::REWARD) {
+      eval_hw->SetTrait(TRAIT_ID__REWARD_FB, cell_value);
+      maze.ClearRewards();
+    }
+
+    // Gather agent's reward/penalty feedback
     const double penalty_fb = eval_hw->GetTrait(TRAIT_ID__PENALTY_FB);
     const double reward_fb = eval_hw->GetTrait(TRAIT_ID__REWARD_FB); 
-    // TODO: finish this up.
-    // Queue event
-    // eval_hw->
+
+    std::cout << "  Location: " << loc << std::endl;
+    std::cout << "  Location type: " << TMaze::CellTypeToString(cell.GetType()) << std::endl;
+    std::cout << "  penalty_fb: " << penalty_fb << std::endl;
+    std::cout << "  cell value: " << cell_value << std::endl;
+
+    // TODO: Adjust fitness/phenotype
+    
+    // if (trigger_loc_event) {
+    //   // Configure event memory
+    //   memory_t mem;
+    //   mem[EVENT_DATA_ID__VALUE] = cell_value;
+    //   mem[EVENT_DATA_ID__PENALTY_FB] = penalty_fb;
+    //   // Trigger event! 
+    //   eval_hw->TriggerEvent("MazeLocation", maze_tags[type_id], mem);
+    // }
+              
   });
   
   // end_agent_eval_sig
   // do_agent_maze_trial_sig
   // end_agent_maze_trial_sig
-  // maze_location_sig
   // do_agent_advance_sig
   
 
