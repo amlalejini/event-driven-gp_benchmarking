@@ -370,6 +370,7 @@ protected:
     std::cout << "=== MAZE ===" << std::endl;
     maze.Print();
 
+    exit(-1);
   }
 
 public:
@@ -506,7 +507,7 @@ public:
       }
     }
 
-    Test();
+    // Test();
   }
 
   ~Experiment() {
@@ -621,12 +622,10 @@ void Experiment::Inst_GetCorridorLen(hardware_t & hw, const inst_t & inst) {
 
 // ================== Event definition implementations ==================
 void Experiment::EventDispatch__MazeLocation(hardware_t & hw, const event_t & event) {
-  std::cout << "->Dispatching maze loc event, queuing it up!" << std::endl;
   hw.QueueEvent(event); // self-queue the event
 }
 
 void Experiment::EventHandler__MazeLocation(hardware_t & hw, const event_t & event) {
-  std::cout << "->Handling maze loc event, spawn a core!" << std::endl;
   hw.SpawnCore(event.affinity, hw.GetMinBindThresh(), event.msg, false, true);
 }
 
@@ -671,7 +670,7 @@ void Experiment::InitPopulation__FromAncestorFile() {
   std::cout << " --- Ancestor program: ---" << std::endl;
   ancestor_prog.PrintProgramFull();
   std::cout << " -------------------------" << std::endl;
-  world->Inject(ancestor_prog, 1);    // Inject single, common ancestor into population.
+  world->Inject(ancestor_prog, POP_SIZE);    // Inject population!
 }
 
 void Experiment::GenerateMazeTags__FromTagFile() {
@@ -1097,10 +1096,15 @@ void Experiment::DoConfig__Experiment() {
     }
 
     std::cout << "Update: " << update << " Max score: " << best_score << std::endl;
+    // TODO: snapshot here!
 
   });
   
     // do_world_update_sig
+  do_world_update_sig.AddAction([this]() {
+    world->Update();
+    world->DoMutations(ELITE_SELECT__ELITE_CNT);
+  });
 
   // NOTE: there may be multiple evaluations for each agent.
   begin_agent_eval_sig.AddAction([this](agent_t & agent) {
@@ -1115,7 +1119,6 @@ void Experiment::DoConfig__Experiment() {
   });
 
   begin_agent_maze_trial_sig.AddAction([this](agent_t & agent) {
-    std::cout << "Begin agent maze trial!" << std::endl;
     
     // Reset maze
     maze.ResetRewards();
@@ -1195,7 +1198,6 @@ void Experiment::DoConfig__Experiment() {
 
   // Gets triggered when an agent goes to a new location... TODO: finish, incorporate memory wiping, etc
   maze_location_sig.AddAction([this](agent_t & agent) {
-    std::cout << "-- Maze location signal --" << std::endl;
     // Get the phenotype (to be adjusted)
     const size_t agentID = agent.GetID();
     phenotype_t & phen = phen_cache.Get(agentID, eval_id);
@@ -1218,7 +1220,6 @@ void Experiment::DoConfig__Experiment() {
 
     // Did the agent finish the maze?
     if (cell.GetType() == TMaze::CellType::START && eval_hw->GetTrait(TRAIT_ID__REWARD_COLLECTED)) {
-      std::cout << "Maze is completed!!" << std::endl;
       eval_hw->SetTrait(TRAIT_ID__DONE, 1);
       phen.total_maze_completions++;
     }
@@ -1243,13 +1244,7 @@ void Experiment::DoConfig__Experiment() {
         exit(-1);
       }
     }
-    phen.total_actions++;
-
-    std::cout << "  Location: " << loc << std::endl;
-    std::cout << "  Location type: " << TMaze::CellTypeToString(cell.GetType()) << std::endl;
-    std::cout << "  penalty_fb: " << penalty_fb << std::endl;
-    std::cout << "  reward_fb: " << reward_fb << std::endl;
-    std::cout << "  cell value: " << cell_value << std::endl;    
+    phen.total_actions++;   
      
   });
 
@@ -1281,13 +1276,7 @@ void Experiment::DoConfig__Experiment() {
     phenotype_t & phen = phen_cache.Get(agentID, eval_id);
     // End of an evalution, should go ahead and record the score for this evaluation period.
     phen.score = phen.GetTotalCollectedResourceValue() - phen.GetTotalPenaltyValue();
-  });
-  
-  // end_agent_eval_sig
-  // do_agent_maze_trial_sig
-  // end_agent_maze_trial_sig
-  // do_agent_advance_sig
-  
+  });  
 
   // Configure selection
   switch (SELECTION_METHOD) {
@@ -1303,9 +1292,6 @@ void Experiment::DoConfig__Experiment() {
       exit(-1);
     }
   }
-
-  // Configure world upate. 
-  // NOTE: mutate after update; snapshot before update
 
 }
 
