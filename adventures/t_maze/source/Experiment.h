@@ -25,6 +25,8 @@
 #include "tools/math.h"
 #include "tools/string_utils.h"
 
+#include "../../utility_belt/source/utilities.h"
+
 #include "t_maze-config.h"
 #include "TMaze.h"
 
@@ -42,6 +44,9 @@ constexpr size_t SELECTION_METHOD_ID__TOURNAMENT = 0;
 
 constexpr size_t MAZE_TRIAL_EXECUTION_METHOD_ID__CONTINUOUS = 0;
 constexpr size_t MAZE_TRIAL_EXECUTION_METHOD_ID__STEPS = 1;
+
+constexpr size_t MAZE_CELL_TAG_GENERATION_METHOD_ID__RAND = 0;
+constexpr size_t MAZE_CELL_TAG_GENERATION_METHOD_ID__LOAD = 1;
 
 constexpr size_t TAG_WIDTH = 16;
 
@@ -165,6 +170,8 @@ protected:
   size_t MAZE_TRIAL_TIME;
   // - T-maze group
   size_t MAZE_CORRIDOR_LEN;
+  size_t MAZE_CELL_TAG_GENERATION_METHOD;
+  std::string MAZE_CELL_TAG_FPATH;
   // - SignalGP function regulation group
   size_t SIMILARITY_ADJUSTMENT_METHOD;
   size_t REF_MOD_ADJUSTMENT_TYPE;
@@ -220,6 +227,9 @@ protected:
 
   TMaze maze;
 
+  // std::unordered_map<TMaze::CellType, tag_t> maze_tags;
+  emp::vector<tag_t> maze_tags;
+
   // Run signals
   emp::Signal<void(void)> do_begin_run_setup_sig;   ///< Triggered at begining of run.
   emp::Signal<void(void)> do_pop_init_sig;          ///< Triggered during run setup. Defines way population is initialized.
@@ -254,11 +264,6 @@ protected:
       }
       end_agent_eval_sig.Trigger(agent);
     }
-  }
-
-  void ResetMaze() {
-    // Randomize large/small reward. 
-
   }
 
   /// Scratch/test function.
@@ -307,7 +312,7 @@ public:
       trial_time(0), trial_step(0), 
       // done_step(false), done_trial(false),
       dom_agent_id(0), phen_cache(0, 0),
-      maze()
+      maze(), maze_tags(0)
   { 
     // Load configuration parameters. 
     // - General parameters
@@ -335,6 +340,8 @@ public:
     MAZE_TRIAL_TIME = config.MAZE_TRIAL_TIME();
     // - T-maze parameters
     MAZE_CORRIDOR_LEN = config.MAZE_CORRIDOR_LEN();
+    MAZE_CELL_TAG_GENERATION_METHOD = config.MAZE_CELL_TAG_GENERATION_METHOD();
+    MAZE_CELL_TAG_FPATH = config.MAZE_CELL_TAG_FPATH();
     // - SignalGP function regulation parameters
     SIMILARITY_ADJUSTMENT_METHOD = config.SIMILARITY_ADJUSTMENT_METHOD();
     REF_MOD_ADJUSTMENT_TYPE = config.REF_MOD_ADJUSTMENT_TYPE();
@@ -376,6 +383,30 @@ public:
 
     // Configure the maze.
     maze.Resize(MAZE_CORRIDOR_LEN);
+
+    // Configure maze tags
+    switch (MAZE_CELL_TAG_GENERATION_METHOD) {
+      case MAZE_CELL_TAG_GENERATION_METHOD_ID__RAND: {
+        maze_tags = toolbelt::GenerateRandomTags<TAG_WIDTH>(*random, TMaze::NUM_CELL_TYPES, true);
+        SaveMazeTags();
+        break;
+      }
+      case MAZE_CELL_TAG_GENERATION_METHOD_ID__LOAD: {
+        GenerateMazeTags__FromTagFile();
+        break;
+      }
+      default: {
+        std::cout << "Unrecognized MAZE_CELL_TAG_GENERATION_METHOD (" << MAZE_CELL_TAG_GENERATION_METHOD << "). Exiting..." << std::endl;
+        exit(-1);
+      }
+    }
+
+    // Print maze tags
+    std::cout << "Maze tags: " << std::endl;
+    for (size_t i = 0; i < maze_tags.size(); ++i) {
+      TMaze::CellType type = TMaze::GetCellType(i);
+      std::cout << type << ":" << TMaze::CellTypeToString(type) << ":"; maze_tags[i].Print(); std::cout << std::endl;
+    }
 
     // Make empty instruction/event libraries
     inst_lib = emp::NewPtr<inst_lib_t>();
@@ -421,6 +452,9 @@ public:
 
   // === Misc. utility functions ===
   void InitPopulation__FromAncestorFile();
+
+  void GenerateMazeTags__FromTagFile();
+  void SaveMazeTags();
 
   // === Extra SignalGP instruction definitions ===
   // -- Execution control instructions --
@@ -488,6 +522,44 @@ void Experiment::InitPopulation__FromAncestorFile() {
   ancestor_prog.PrintProgramFull();
   std::cout << " -------------------------" << std::endl;
   world->Inject(ancestor_prog, 1);    // Inject single, common ancestor into population.
+}
+
+void Experiment::GenerateMazeTags__FromTagFile() {
+  maze_tags.resize(TMaze::NUM_CELL_TYPES, tag_t());
+  std::ifstream tag_fstream(MAZE_CELL_TAG_FPATH);
+  if (!tag_fstream.is_open()) {
+    std::cout << "Failed to open env_tags.csv. Exiting..." << std::endl;
+    exit(-1);
+  }
+  std::string cur_line;
+  emp::vector<std::string> line_components;
+  std::getline(tag_fstream, cur_line); // Consume header.
+  while (!tag_fstream.eof()) {
+    std::getline(tag_fstream, cur_line);
+    emp::remove_whitespace(cur_line);
+    if (cur_line == emp::empty_string()) continue;
+    emp::slice(cur_line, line_components, ',');
+    int tag_id = std::stoi(line_components[0]);
+    if (tag_id > maze_tags.size()) {
+      std::cout << "WARNING: tag ID exceeds NUM_CELL_TYPES" << std::endl;
+      continue;
+    }
+    for (size_t i = 0; i < line_components[1].size(); ++i) {
+      if (i >= TAG_WIDTH) break;
+      if (line_components[1][i] == '1') maze_tags[tag_id].Set(maze_tags[tag_id].GetSize() - i - 1, true);
+    }
+  }
+  tag_fstream.close();
+}
+
+void Experiment::SaveMazeTags() {
+  // Save out the environment states.
+  std::ofstream mazetags_ofstream(MAZE_CELL_TAG_FPATH);
+  mazetags_ofstream << "cell_id,tag\n";
+  for (size_t i = 0; i < maze_tags.size(); ++i) {
+    mazetags_ofstream << i << ","; maze_tags[i].Print(mazetags_ofstream); mazetags_ofstream << "\n";
+  }
+  mazetags_ofstream.close();
 }
 
 // ================== Evolution function implementations ==================
@@ -905,7 +977,7 @@ void Experiment::DoConfig__Experiment() {
         for (trial_step = 0; trial_step < MAZE_TRIAL_STEPS; ++trial_step) {
           for (trial_time = 0; trial_time < TIME_PER_ACTION; ++trial_time) {
             do_agent_advance_sig.Trigger(agent); 
-            // TODO: if (action): break
+            // TODO: if (action): break ==> kill threads, wipe memory, etc? 
             if (eval_hw->GetTrait(TRAIT_ID__LAST_ACTION)) {
               break;      
             }
@@ -923,7 +995,10 @@ void Experiment::DoConfig__Experiment() {
   do_agent_advance_sig.AddAction([this](agent_t & agent) {
     // Advance the agent
     eval_hw->SingleProcess();
+  });
 
+  maze_location_sig.AddAction([this](agent_t & agent) {
+    // eval_hw->
   });
   
   // end_agent_eval_sig

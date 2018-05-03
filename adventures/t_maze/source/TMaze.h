@@ -28,6 +28,7 @@ class TMaze {
     enum Facing {N=0, E, S, W};
     enum CellType {START=0, REWARD, DECISION, CORRIDOR};
     static constexpr size_t NUM_DIRECTIONS = 4;
+    static constexpr size_t NUM_CELL_TYPES = 4;
 
     // A few utility functions dealing with maze facing
     static constexpr Facing GetFacing(size_t i) { 
@@ -36,6 +37,14 @@ class TMaze {
     static constexpr size_t GetFacing(Facing val) {
       return val;
     }
+
+    static constexpr CellType GetCellType(size_t i) {
+      emp_assert(i < NUM_CELL_TYPES); return static_cast<CellType>(i);
+    }
+    static constexpr size_t GetCellType(CellType val) {
+      return val;
+    }
+
     static std::string FacingToString(Facing facing) {
       switch(facing) {
         case Facing::N:
