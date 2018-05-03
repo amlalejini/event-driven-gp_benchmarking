@@ -289,34 +289,30 @@ protected:
     std::cout << " --------------------- " << std::endl;
     Agent test_hero(test_prog);
 
+    do_agent_advance_sig.AddAction([this](agent_t & agent) {
+      std::cout << "=== T: " << trial_time << " ===" << std::endl;
+      std::cout << "Function modifiers:";
+      for (size_t fID = 0; fID < eval_hw->GetProgram().GetSize(); ++fID) {
+        std::cout << " " << fID << ":" << eval_hw->GetProgram()[fID].GetRefModifier(); 
+      } std::cout << "\n";
+      eval_hw->PrintState();
+    });
+
     // 2) Run program!
     maze.ResetRewards();
 
     eval_hw->SetProgram(test_prog);
     eval_hw->ResetHardware();
 
-    eval_hw->SetTrait(TRAIT_ID__LOC, maze.GetStartCellID());  // Set location trait.
-    eval_hw->SetTrait(TRAIT_ID__FACING, TMaze::GetFacing(TMaze::Facing::N)); // Set heading trait.
-    eval_hw->SetTrait(TRAIT_ID__REWARD_FB, 0);
-    eval_hw->SetTrait(TRAIT_ID__PENALTY_FB, 0);
-    eval_hw->SetTrait(TRAIT_ID__REWARD_COLLECTED, 0);
-
-    maze_location_sig.Trigger(test_hero);
+    begin_agent_maze_trial_sig.Trigger(test_hero);
 
     // - Print hardware state
     std::cout << "=== INITIAL STATE ===" << std::endl;
     eval_hw->PrintState();
-    for (size_t t = 0; t < 64; ++t) {
-      eval_hw->SingleProcess();
-      std::cout << "=== T: " << t << " ===" << std::endl;
-      // Print function modifiers
-      std::cout << "Function modifiers:";
-      for (size_t fID = 0; fID < eval_hw->GetProgram().GetSize(); ++fID) {
-        std::cout << " " << fID << ":" << eval_hw->GetProgram()[fID].GetRefModifier(); 
-      } std::cout << "\n";
-      eval_hw->PrintState();
-    }
-
+    
+    do_agent_maze_trial_sig.Trigger(test_hero);
+    
+    end_agent_maze_trial_sig.Trigger(test_hero);
 
     std::cout << "=== MAZE ===" << std::endl;
     maze.Print();
@@ -495,6 +491,8 @@ public:
   void Inst_Forward(hardware_t & hw, const inst_t & inst);
   void Inst_RotCW(hardware_t & hw, const inst_t & inst);
   void Inst_RotCCW(hardware_t & hw, const inst_t & inst);
+  // -- Sensor instructions --
+  void Inst_GetCorridorLen(hardware_t & hw, const inst_t & inst);
 
   // === SignalGP event handlers/dispatchers ===
   static void EventDispatch__MazeLocation(hardware_t & hw, const event_t & event);
@@ -550,6 +548,11 @@ void Experiment::Inst_Forward(hardware_t & hw, const inst_t & inst) {
     hw.SetTrait(TRAIT_ID__PENALTY_FB, 1);
   }
   hw.SetTrait(TRAIT_ID__LAST_ACTION, ACTION_ID__FORWARD);
+}
+
+void Experiment::Inst_GetCorridorLen(hardware_t & hw, const inst_t & inst) {
+  state_t & state = hw.GetCurState();
+  state.SetLocal(inst.args[0], MAZE_CORRIDOR_LEN);
 }
 
 // ================== Event definition implementations ==================
@@ -884,6 +887,11 @@ void Experiment::DoConfig__Hardware() {
     this->Inst_RotCCW(hw, inst);
   }, 0, "Rotate agent counter-clockwise.");
 
+  // Sensors
+  inst_lib->AddInst("GetCorridorLen", [this](hardware_t & hw, const inst_t & inst) {
+    this->Inst_GetCorridorLen(hw, inst);
+  }, 1, "WM[ARG0] = CORRIDOR LENGTH");
+
   // Regulatory instructions
   switch(REF_MOD_ADJUSTMENT_TYPE) {
     case REF_MOD_ADJUSTMENT_TYPE_ID__ADD: {
@@ -1045,6 +1053,8 @@ void Experiment::DoConfig__Experiment() {
   });
 
   begin_agent_maze_trial_sig.AddAction([this](agent_t & agent) {
+    std::cout << "Begin agent maze trial!" << std::endl;
+    
     // Reset maze
     maze.ResetRewards();
 
