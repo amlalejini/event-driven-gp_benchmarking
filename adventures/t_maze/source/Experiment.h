@@ -1151,6 +1151,7 @@ void Experiment::DoConfig__Experiment() {
           do_agent_advance_sig.Trigger(agent);
           if (eval_hw->GetTrait(TRAIT_ID__LAST_ACTION)) {
             after_agent_action_sig.Trigger(agent);
+            if (eval_hw->GetTrait(TRAIT_ID__DONE)) break;
           }
         }
       });
@@ -1165,6 +1166,7 @@ void Experiment::DoConfig__Experiment() {
             if (eval_hw->GetTrait(TRAIT_ID__LAST_ACTION)) { break; }
           } // End single step
           after_agent_action_sig.Trigger(agent);
+          if (eval_hw->GetTrait(TRAIT_ID__DONE)) break;
         } // End trial 
       });
       break;
