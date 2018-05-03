@@ -257,6 +257,7 @@ protected:
 
   emp::Signal<void(agent_t &)> maze_location_sig; ///< When triggered, give SignalGP agent event/signal indicating current location in grid.
   emp::Signal<void(agent_t &)> do_agent_advance_sig; ///< When triggered, advance SignalGP evaluation hardware
+  emp::Signal<void(agent_t &)> after_agent_action_sig; ///< Triggered after agent performs action
 
   void Evaluate(agent_t & agent) {
     for (eval_id = 0; eval_id < EVALUATION_CNT; ++eval_id) {
@@ -1077,43 +1078,23 @@ void Experiment::DoConfig__Experiment() {
         // Do the trial!
         for (trial_time = 0; trial_time < MAZE_TRIAL_TIME; ++trial_time) {
           do_agent_advance_sig.Trigger(agent);
+          if (eval_hw->GetTrait(TRAIT_ID__LAST_ACTION)) {
+            after_agent_action_sig.Trigger(agent);
+          }
         }
       });
       break;
     }
     case MAZE_TRIAL_EXECUTION_METHOD_ID__STEPS: {
       do_agent_maze_trial_sig.AddAction([this](agent_t & agent) {
-        for (trial_step = 0; trial_step < MAZE_TRIAL_STEPS; ++trial_step) {
-          
+        for (trial_step = 0; trial_step < MAZE_TRIAL_STEPS; ++trial_step) { 
           // Run step until action or until step-time runs out
           for (trial_time = 0; trial_time < TIME_PER_ACTION; ++trial_time) {
             do_agent_advance_sig.Trigger(agent); 
             if (eval_hw->GetTrait(TRAIT_ID__LAST_ACTION)) { break; }
           } // End single step
-
-          // Trigger maze location
-          maze_location_sig.Trigger(agent);
-              
-          if (AFTER_ACTION__RESET) {
-            eval_hw->ResetHardware(AFTER_ACTION__WIPE_SHARED_MEM, AFTER_ACTION__CLEAR_FUNC_REF_MODS);
-          }
-
-          if (AFTER_ACTION__SIGNAL) {
-            TMaze::Cell & cell = maze.GetCell(eval_hw->GetTrait(TRAIT_ID__LOC));
-            memory_t mem;
-            mem[EVENT_DATA_ID__VALUE] = cell.GetValue();
-            mem[EVENT_DATA_ID__PENALTY_FB] = eval_hw->GetTrait(TRAIT_ID__PENALTY_FB);
-            eval_hw->TriggerEvent("MazeLocation", maze_tags[TMaze::GetCellType(cell.GetType())], mem);
-          }
-
-          // After action clean-up
-          eval_hw->SetTrait(TRAIT_ID__LAST_ACTION, ACTION_ID__NONE);
-          eval_hw->SetTrait(TRAIT_ID__PENALTY_FB, 0);
-          eval_hw->SetTrait(TRAIT_ID__REWARD_FB, 0);
-        
+          after_agent_action_sig.Trigger(agent);
         } // End trial 
-      
-      
       });
       break;
     }
@@ -1154,16 +1135,31 @@ void Experiment::DoConfig__Experiment() {
     std::cout << "  cell value: " << cell_value << std::endl;
 
     // TODO: Adjust fitness/phenotype
-    
-    // if (trigger_loc_event) {
-    //   // Configure event memory
-    //   memory_t mem;
-    //   mem[EVENT_DATA_ID__VALUE] = cell_value;
-    //   mem[EVENT_DATA_ID__PENALTY_FB] = penalty_fb;
-    //   // Trigger event! 
-    //   eval_hw->TriggerEvent("MazeLocation", maze_tags[type_id], mem);
-    // }
+  
               
+  });
+
+  after_agent_action_sig.AddAction([this](agent_t & agent) {
+    // Trigger maze location
+    maze_location_sig.Trigger(agent);
+        
+    if (AFTER_ACTION__RESET) {
+      eval_hw->ResetHardware(AFTER_ACTION__WIPE_SHARED_MEM, AFTER_ACTION__CLEAR_FUNC_REF_MODS);
+    }
+
+    if (AFTER_ACTION__SIGNAL) {
+      TMaze::Cell & cell = maze.GetCell(eval_hw->GetTrait(TRAIT_ID__LOC));
+      memory_t mem;
+      mem[EVENT_DATA_ID__VALUE] = cell.GetValue();
+      mem[EVENT_DATA_ID__PENALTY_FB] = eval_hw->GetTrait(TRAIT_ID__PENALTY_FB);
+      eval_hw->TriggerEvent("MazeLocation", maze_tags[TMaze::GetCellType(cell.GetType())], mem);
+    }
+
+    // After action clean-up
+    eval_hw->SetTrait(TRAIT_ID__LAST_ACTION, ACTION_ID__NONE);
+    eval_hw->SetTrait(TRAIT_ID__PENALTY_FB, 0);
+    eval_hw->SetTrait(TRAIT_ID__REWARD_FB, 0);
+        
   });
   
   // end_agent_eval_sig
