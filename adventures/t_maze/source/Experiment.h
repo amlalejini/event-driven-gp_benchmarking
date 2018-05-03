@@ -56,6 +56,7 @@ constexpr size_t TRAIT_ID__LAST_ACTION = 2;
 constexpr size_t TRAIT_ID__REWARD_FB = 3;
 constexpr size_t TRAIT_ID__PENALTY_FB = 4;
 constexpr size_t TRAIT_ID__REWARD_COLLECTED = 5; 
+constexpr size_t TRAIT_ID__DONE = 6;
 
 constexpr size_t ACTION_ID__NONE = 0;
 constexpr size_t ACTION_ID__FORWARD = 1;
@@ -220,6 +221,8 @@ protected:
   size_t MAZE_TRIAL_STEPS;
   size_t TIME_PER_ACTION;
   size_t MAZE_TRIAL_TIME;
+  double COLLISION_PENALTY;
+  double MAZE_INCOMPLETE_PENALTY;
   // - T-maze group
   size_t MAZE_CORRIDOR_LEN;
   double MAZE_SMALL_REWARD_VALUE;
@@ -403,6 +406,8 @@ public:
     MAZE_TRIAL_STEPS = config.MAZE_TRIAL_STEPS();
     TIME_PER_ACTION = config.TIME_PER_ACTION();
     MAZE_TRIAL_TIME = config.MAZE_TRIAL_TIME();
+    COLLISION_PENALTY = config.COLLISION_PENALTY();
+    MAZE_INCOMPLETE_PENALTY = config.MAZE_INCOMPLETE_PENALTY();
     // - T-maze parameters
     MAZE_CORRIDOR_LEN = config.MAZE_CORRIDOR_LEN();
     MAZE_SMALL_REWARD_VALUE = config.MAZE_SMALL_REWARD_VALUE();
@@ -1097,13 +1102,14 @@ void Experiment::DoConfig__Experiment() {
 
   // NOTE: there may be multiple evaluations for each agent.
   begin_agent_eval_sig.AddAction([this](agent_t & agent) {
-    // Reset hardware
+    // Reset hardware (hard, complete reset)
     eval_hw->ResetHardware();
-    // - Reset traits
-    eval_hw->SetTrait(TRAIT_ID__LOC, 0); 
-    eval_hw->SetTrait(TRAIT_ID__FACING, 0);
     // Reset the maze 
     maze.RandomizeRewards(*random);
+    // Reset phenotype.
+    const size_t agentID = agent.GetID();
+    phenotype_t & phen = phen_cache.Get(agentID, eval_id);
+    phen.Reset();
   });
 
   begin_agent_maze_trial_sig.AddAction([this](agent_t & agent) {
@@ -1125,6 +1131,7 @@ void Experiment::DoConfig__Experiment() {
     eval_hw->SetTrait(TRAIT_ID__REWARD_FB, 0);
     eval_hw->SetTrait(TRAIT_ID__PENALTY_FB, 0);
     eval_hw->SetTrait(TRAIT_ID__REWARD_COLLECTED, 0);
+    eval_hw->SetTrait(TRAIT_ID__DONE, 0);
     
     // Trigger START signal
     maze_location_sig.Trigger(agent);
@@ -1176,30 +1183,61 @@ void Experiment::DoConfig__Experiment() {
   // Gets triggered when an agent goes to a new location... TODO: finish, incorporate memory wiping, etc
   maze_location_sig.AddAction([this](agent_t & agent) {
     std::cout << "-- Maze location signal --" << std::endl;
+    // Get the phenotype (to be adjusted)
+    const size_t agentID = agent.GetID();
+    phenotype_t & phen = phen_cache.Get(agentID, eval_id);
+    // total_maze_completions
 
     // Where is the agent at? 
     const size_t loc = (size_t)eval_hw->GetTrait(TRAIT_ID__LOC);
     TMaze::Cell & cell = maze.GetCell(loc);
     const size_t type_id = TMaze::GetCellType(cell.GetType());
     const double cell_value = cell.GetValue();
+    const size_t last_action_id = (size_t)eval_hw->GetTrait(TRAIT_ID__LAST_ACTION);
 
     // Did agent collect a reward?
     if (cell.GetType() == TMaze::CellType::REWARD) {
       eval_hw->SetTrait(TRAIT_ID__REWARD_FB, cell_value);
       eval_hw->SetTrait(TRAIT_ID__REWARD_COLLECTED, 1);
+      phen.total_resource_collections++;
+      phen.total_collected_resource_value += cell_value;
       maze.ClearRewards();
+    }
+
+    // Did the agent finish the maze?
+    if (cell.GetType() == TMaze::CellType::START && eval_hw->GetTrait(TRAIT_ID__REWARD_COLLECTED)) {
+      std::cout << "Maze is completed!!" << std::endl;
+      eval_hw->SetTrait(TRAIT_ID__DONE, 1);
+      phen.total_maze_completions++;
     }
 
     // Gather agent's reward/penalty feedback
     const double penalty_fb = eval_hw->GetTrait(TRAIT_ID__PENALTY_FB);
     const double reward_fb = eval_hw->GetTrait(TRAIT_ID__REWARD_FB); 
 
+    // Incur penalty for collision!
+    if (penalty_fb > 0) {
+      phen.total_collisions++;
+      phen.total_penalty_value += COLLISION_PENALTY;
+    }
+    
+    switch (last_action_id) {
+      case ACTION_ID__NONE: { break; }
+      case ACTION_ID__FORWARD: { phen.total_forward++; break; }
+      case ACTION_ID__ROT_CW: { phen.total_rotcw++; break; }
+      case ACTION_ID__ROT_CCW: { phen.total_rotccw++; break; }
+      default: {
+        std::cout << "Unrecognized action! Something has gone horribly wrong! Exiting..." << std::endl;
+        exit(-1);
+      }
+    }
+    phen.total_actions++;
+
     std::cout << "  Location: " << loc << std::endl;
     std::cout << "  Location type: " << TMaze::CellTypeToString(cell.GetType()) << std::endl;
     std::cout << "  penalty_fb: " << penalty_fb << std::endl;
-    std::cout << "  cell value: " << cell_value << std::endl;
-
-    // TODO: Adjust fitness/phenotype
+    std::cout << "  reward_fb: " << reward_fb << std::endl;
+    std::cout << "  cell value: " << cell_value << std::endl;    
      
   });
 
