@@ -64,7 +64,6 @@ EMP_BUILD_CONFIG( TMazeConfig,
   VALUE(SGP__PER_FUNC__FUNC_DEL_RATE, double, 0.05, "Per-function rate of function deletions."),
   GROUP(DATA_GROUP, "Data Collection Settings"),
   VALUE(SYSTEMATICS_INTERVAL, size_t, 100, "Interval to record systematics summary stats."),
-  VALUE(FITNESS_INTERVAL, size_t, 100, "Interval to record fitness summary stats."),
   VALUE(POP_SNAPSHOT_INTERVAL, size_t, 10000, "Interval to take a full snapshot of the population."),
   VALUE(DATA_DIRECTORY, std::string, "./output", "Location to dump data output.")
 )

@@ -172,11 +172,13 @@ public:
       size_t agent_cnt;
       size_t eval_cnt;
       emp::vector<phenotype_t> agent_phen_cache;
+      emp::vector<size_t> agent_representative_eval;
 
     public:
       PhenotypeCache(size_t _agent_cnt, size_t _eval_cnt) 
         : agent_cnt(_agent_cnt), eval_cnt(_eval_cnt), 
-          agent_phen_cache(agent_cnt * eval_cnt)
+          agent_phen_cache(agent_cnt * eval_cnt),
+          agent_representative_eval(agent_cnt, 0)
       { ; }
 
       /// Resize phenotype cache. 
@@ -185,11 +187,35 @@ public:
         eval_cnt = _eval_cnt;
         agent_phen_cache.clear();
         agent_phen_cache.resize(agent_cnt * eval_cnt);
+        agent_representative_eval.clear();
+        agent_representative_eval.resize(agent_cnt, 0);
       }
 
       /// Access a phenotype from the cache
       phenotype_t & Get(size_t agent_id, size_t eval_id) {
         return agent_phen_cache[(agent_id * eval_cnt) + eval_id];
+      }
+
+      size_t GetRepresentativeEval(size_t agent_id) {
+        emp_assert(agent_id < agent_cnt);
+        return agent_representative_eval[agent_id];
+      }
+
+      phenotype_t & GetRepresentative(size_t agent_id) {
+        return Get(agent_id, agent_representative_eval[agent_id]);
+      }
+
+      void SetRepresentativeEval(size_t agent_id) {
+        emp_assert(agent_id < agent_cnt);
+        // agent_representative_eval[agent_id] = eval_id;
+        double score = Get(agent_id, 0).GetScore();
+        size_t repID = 0;
+        // Return the minimum score!
+        for (size_t eID = 1; eID < eval_cnt; ++eID) {
+          phenotype_t & phen = Get(agent_id, eID);
+          if (phen.GetScore() < score) { score = phen.GetScore(); repID = eID; }
+        }
+        agent_representative_eval[agent_id] = repID;
       }
 
       // TODO: reset entire cache
@@ -258,7 +284,6 @@ protected:
   double SGP__PER_FUNC__FUNC_DEL_RATE;
   // - Data collection group
   size_t SYSTEMATICS_INTERVAL;
-  size_t FITNESS_INTERVAL;
   size_t POP_SNAPSHOT_INTERVAL;
   std::string DATA_DIRECTORY;
 
@@ -454,7 +479,6 @@ public:
     SGP__PER_FUNC__FUNC_DEL_RATE = config.SGP__PER_FUNC__FUNC_DEL_RATE();
     // - Output group parameters
     SYSTEMATICS_INTERVAL = config.SYSTEMATICS_INTERVAL();
-    FITNESS_INTERVAL = config.FITNESS_INTERVAL();
     POP_SNAPSHOT_INTERVAL = config.POP_SNAPSHOT_INTERVAL();
     DATA_DIRECTORY = config.DATA_DIRECTORY();
 
@@ -561,7 +585,10 @@ public:
   void GenerateMazeTags__FromTagFile();
   void SaveMazeTags();
 
+  // === Systematics functions ===
   void Snapshot__Programs(size_t u);
+
+  emp::DataFile & AddDominantFile(const std::string & fpath="dominant.csv");
 
   // === Extra SignalGP instruction definitions ===
   // -- Execution control instructions --
@@ -728,6 +755,8 @@ void Experiment::SaveMazeTags() {
   mazetags_ofstream.close();
 }
 
+
+// ================== Systematics functions ==================
 void Experiment::Snapshot__Programs(size_t u) {
   std::string snapshot_dir = DATA_DIRECTORY + "pop_" + emp::to_string((int)u);
   mkdir(snapshot_dir.c_str(), ACCESSPERMS);
@@ -741,6 +770,80 @@ void Experiment::Snapshot__Programs(size_t u) {
   }
   prog_ofstream.close();
 }
+
+emp::DataFile & Experiment::AddDominantFile(const std::string & fpath) {
+  auto & file = world->SetupFile(fpath);
+
+  std::function<size_t(void)> get_update = [this]() { return world->GetUpdate(); };
+  file.AddFun(get_update, "update", "Update");
+
+  std::function<size_t(void)> get_aID = [this]() { return dom_agent_id; };
+  file.AddFun(get_aID, "id", "Agent ID");
+
+  std::function<double(void)> get_score = [this]() {
+    phenotype_t & phen = phen_cache.GetRepresentative(dom_agent_id);
+    return phen.GetScore();
+  };
+  file.AddFun(get_score, "score", "Dominant score");
+
+  std::function<size_t(void)> get_total_collisions = [this]() {
+    phenotype_t & phen = phen_cache.GetRepresentative(dom_agent_id);
+    return phen.GetTotalCollisions();    
+  };
+  file.AddFun(get_total_collisions, "total_collision_cnt", "Total number of collisions across trials");
+
+  std::function<size_t(void)> get_total_maze_completions = [this]() {
+    phenotype_t & phen = phen_cache.GetRepresentative(dom_agent_id);
+    return phen.GetTotalMazeCompletions();    
+  };
+  file.AddFun(get_total_maze_completions, "total_maze_completion_cnt", "Total number of times maze was completed across trials");
+
+  std::function<size_t(void)> get_total_rew_collections = [this]() {
+    phenotype_t & phen = phen_cache.GetRepresentative(dom_agent_id);
+    return phen.GetTotalResourceCollections();    
+  };
+  file.AddFun(get_total_rew_collections, "total_reward_collection_cnt", "Total number of time reward was collected");
+
+  std::function<double(void)> get_total_collected_value = [this]() {
+    phenotype_t & phen = phen_cache.GetRepresentative(dom_agent_id);
+    return phen.GetTotalCollectedResourceValue();    
+  }  ;
+  file.AddFun(get_total_collected_value, "total_collected_value", "Total value collected across all trials");
+
+  std::function<double(void)> get_total_penalty_value = [this]() {
+    phenotype_t & phen = phen_cache.GetRepresentative(dom_agent_id);
+    return phen.GetTotalPenaltyValue();    
+  };   
+  file.AddFun(get_total_penalty_value, "total_penalty_value", "Total penalty value received across all trials.");
+  
+  std::function<size_t(void)> get_total_rotcw = [this]() {
+    phenotype_t & phen = phen_cache.GetRepresentative(dom_agent_id);
+    return phen.GetTotalRotCW();    
+  };
+  file.AddFun(get_total_rotcw, "total_rotcw_cnt", "Total action count.");
+
+  std::function<size_t(void)> get_total_rotccw = [this]() {
+    phenotype_t & phen = phen_cache.GetRepresentative(dom_agent_id);
+    return phen.GetTotalRotCCW();
+  };
+  file.AddFun(get_total_rotccw, "total_rotccw_cnt", "Total action count.");
+
+  std::function<size_t(void)> get_total_forward = [this]() {
+    phenotype_t & phen = phen_cache.GetRepresentative(dom_agent_id);
+    return phen.GetTotalForward();
+  };
+  file.AddFun(get_total_forward, "total_forward_cnt", "Total action count.");
+
+  std::function<size_t(void)> get_total_actions = [this]() {
+    phenotype_t & phen = phen_cache.GetRepresentative(dom_agent_id);
+    return phen.GetTotalActions();
+  };
+  file.AddFun(get_total_actions, "total_actions_cnt", "Total action count.");
+
+  file.PrintHeaderKeys();
+  return file;
+}
+
 
 // ================== Evolution function implementations ==================
 size_t Experiment::Mutate(agent_t & agent, emp::Random & rnd) {
@@ -921,13 +1024,7 @@ size_t Experiment::Mutate(agent_t & agent, emp::Random & rnd) {
 
 double Experiment::CalcFitness(agent_t & agent) {
   size_t aID = agent.GetID();
-  double score = phen_cache.Get(aID, 0).GetScore();
-  // Return the minimum score!
-  for (size_t eID = 1; eID < EVALUATION_CNT; ++eID) {
-    phenotype_t & phen = phen_cache.Get(aID, eID);
-    if (phen.GetScore() < score) score = phen.GetScore();
-  }
-  return score;
+  return phen_cache.GetRepresentative(aID).GetScore();
 }
 
 // ================== Configuration implementations ==================
@@ -1105,8 +1202,10 @@ void Experiment::DoConfig__Experiment() {
     auto & sys_file = world->SetupSystematicsFile(DATA_DIRECTORY + "systematics.csv");
     sys_file.SetTimingRepeat(SYSTEMATICS_INTERVAL);
     auto & fit_file = world->SetupFitnessFile(DATA_DIRECTORY + "fitness.csv");
-    fit_file.SetTimingRepeat(FITNESS_INTERVAL);
+    fit_file.SetTimingRepeat(SYSTEMATICS_INTERVAL);
     // TODO: add any extra fitness tracking files
+    auto & dom_file = this->AddDominantFile(DATA_DIRECTORY + "dominant.csv");
+    dom_file.SetTimingRepeat(SYSTEMATICS_INTERVAL);
     // Initialize the population. 
     do_pop_init_sig.Trigger();
   });
@@ -1124,6 +1223,9 @@ void Experiment::DoConfig__Experiment() {
       eval_hw->SetProgram(our_hero.GetGenome());
       // Evaluate!
       this->Evaluate(our_hero);
+      // Find representative evaluation (the mininum)
+      phen_cache.SetRepresentativeEval(id);
+      // Grab score
       double score = CalcFitness(our_hero);
       if (score > best_score) { best_score = score; dom_agent_id = id; }
     }
@@ -1246,7 +1348,7 @@ void Experiment::DoConfig__Experiment() {
     const size_t last_action_id = (size_t)eval_hw->GetTrait(TRAIT_ID__LAST_ACTION);
 
     // Did agent collect a reward?
-    if (cell.GetType() == TMaze::CellType::REWARD) {
+    if (cell.GetType() == TMaze::CellType::REWARD && cell_value > 0) {
       eval_hw->SetTrait(TRAIT_ID__REWARD_FB, cell_value);
       eval_hw->SetTrait(TRAIT_ID__REWARD_COLLECTED, 1);
       phen.total_resource_collections++;
