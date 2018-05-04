@@ -53,11 +53,11 @@ constexpr size_t TAG_WIDTH = 16;
 constexpr size_t TRAIT_ID__LOC = 0;
 constexpr size_t TRAIT_ID__FACING = 1;
 constexpr size_t TRAIT_ID__LAST_ACTION = 2;
-constexpr size_t TRAIT_ID__REWARD_FB = 3;
-// constexpr size_t TRAIT_ID__PENALTY_FB = 4;
 constexpr size_t TRAIT_ID__REWARD_COLLECTED = 4; 
-constexpr size_t TRAIT_ID__COLLIDED = 5;
-constexpr size_t TRAIT_ID__DONE = 6;
+constexpr size_t TRAIT_ID__REWARD_VALUE = 5;
+constexpr size_t TRAIT_ID__COLLIDED = 6;
+constexpr size_t TRAIT_ID__DONE = 7;
+constexpr size_t TRAIT_ID__COMPLETED_MAZE = 8;
 
 constexpr size_t ACTION_ID__NONE = 0;
 constexpr size_t ACTION_ID__FORWARD = 1;
@@ -500,7 +500,7 @@ public:
     maze.Resize(MAZE_CORRIDOR_LEN);
     maze.SetLargeRewardValue(MAZE_LARGE_REWARD_VALUE);
     maze.SetSmallRewardValue(MAZE_SMALL_REWARD_VALUE);
-    maze.SetBaseValue(0.01);
+    maze.SetBaseValue(0.0);
 
     // Configure maze tags
     switch (MAZE_CELL_TAG_GENERATION_METHOD) {
@@ -653,7 +653,6 @@ void Experiment::Inst_Forward(hardware_t & hw, const inst_t & inst) {
     hw.SetTrait(TRAIT_ID__LOC, cur_cell.GetNeighborID(facing));
   } else {
     // Collision!
-    // hw.SetTrait(TRAIT_ID__PENALTY_FB, 1);
     hw.SetTrait(TRAIT_ID__COLLIDED, 1);
   }
   hw.SetTrait(TRAIT_ID__LAST_ACTION, ACTION_ID__FORWARD);
@@ -1269,16 +1268,16 @@ void Experiment::DoConfig__Experiment() {
     // Configure traits for trail.    
     eval_hw->SetTrait(TRAIT_ID__LOC, maze.GetStartCellID());  // Set location trait.
     eval_hw->SetTrait(TRAIT_ID__FACING, TMaze::GetFacing(TMaze::Facing::N)); // Set heading trait.
-    eval_hw->SetTrait(TRAIT_ID__REWARD_FB, 0);
-    // eval_hw->SetTrait(TRAIT_ID__PENALTY_FB, 0);
     eval_hw->SetTrait(TRAIT_ID__REWARD_COLLECTED, 0);
+    eval_hw->SetTrait(TRAIT_ID__REWARD_VALUE, 0);
     eval_hw->SetTrait(TRAIT_ID__COLLIDED, 0);
     eval_hw->SetTrait(TRAIT_ID__DONE, 0);
+    eval_hw->SetTrait(TRAIT_ID__COMPLETED_MAZE, 0);
     
     // Trigger START signal
     maze_location_sig.Trigger(agent);
     memory_t mem;
-    mem[EVENT_DATA_ID__VALUE] = start_cell.GetValue();
+    mem[EVENT_DATA_ID__VALUE] = 0;
     mem[EVENT_DATA_ID__PENALTY_FB] = 0;
     eval_hw->TriggerEvent("MazeLocation", maze_tags[TMaze::GetCellType(TMaze::CellType::START)], mem);
 
@@ -1286,7 +1285,7 @@ void Experiment::DoConfig__Experiment() {
 
   end_agent_maze_trial_sig.AddAction([this](agent_t & agent) {
     // If you end the trial w/out completing the maze (out of time or you collided), suffer!
-    if (!eval_hw->GetTrait(TRAIT_ID__DONE) || eval_hw->GetTrait(TRAIT_ID__COLLIDED)) {
+    if (!eval_hw->GetTrait(TRAIT_ID__COMPLETED_MAZE)) {
       const size_t agentID = agent.GetID();
       phenotype_t & phen = phen_cache.Get(agentID, eval_id);
       phen.total_penalty_value += MAZE_INCOMPLETE_PENALTY;
@@ -1301,7 +1300,7 @@ void Experiment::DoConfig__Experiment() {
         for (trial_time = 0; trial_time < MAZE_TRIAL_TIME; ++trial_time) {
           do_agent_advance_sig.Trigger(agent);
           
-          if (eval_hw->GetTrait(TRAIT_ID__LAST_ACTION)) {
+          if (eval_hw->GetTrait(TRAIT_ID__LAST_ACTION) != ACTION_ID__NONE) {
             after_agent_action_sig.Trigger(agent);
             if (eval_hw->GetTrait(TRAIT_ID__DONE)) break;
           }
@@ -1315,7 +1314,7 @@ void Experiment::DoConfig__Experiment() {
           // Run step until action or until step-time runs out
           for (trial_time = 0; trial_time < TIME_PER_ACTION; ++trial_time) {
             do_agent_advance_sig.Trigger(agent); 
-            if (eval_hw->GetTrait(TRAIT_ID__LAST_ACTION)) { break; }
+            if (eval_hw->GetTrait(TRAIT_ID__LAST_ACTION) != ACTION_ID__NONE) { break; }
           } // End single step
           after_agent_action_sig.Trigger(agent);
           if (eval_hw->GetTrait(TRAIT_ID__DONE)) break;
@@ -1348,12 +1347,12 @@ void Experiment::DoConfig__Experiment() {
     const size_t last_action_id = (size_t)eval_hw->GetTrait(TRAIT_ID__LAST_ACTION);
 
     // Did agent collect a reward?
-    if (cell.GetType() == TMaze::CellType::REWARD && cell_value > 0) {
-      eval_hw->SetTrait(TRAIT_ID__REWARD_FB, cell_value);
+    if ((cell.GetType() == TMaze::CellType::REWARD) && (cell_value > 0)) {
+      // TODO: double check that this only happens ONCE per trial
+      eval_hw->SetTrait(TRAIT_ID__REWARD_VALUE, cell_value);
       eval_hw->SetTrait(TRAIT_ID__REWARD_COLLECTED, 1);
       phen.total_resource_collections++;
       phen.total_collected_resource_value += cell_value;
-      // maze.ClearRewards();
       maze.ClearCellValues();
     } else {
       phen.total_collected_resource_value += cell_value;
@@ -1363,18 +1362,15 @@ void Experiment::DoConfig__Experiment() {
     // Did the agent finish the maze?
     if (cell.GetType() == TMaze::CellType::START && eval_hw->GetTrait(TRAIT_ID__REWARD_COLLECTED)) {
       eval_hw->SetTrait(TRAIT_ID__DONE, 1);
+      eval_hw->SetTrait(TRAIT_ID__COMPLETED_MAZE, 1);
       phen.total_maze_completions++;
     }
+    // TODO: check resource collection type!
 
-    // Gather agent's reward/penalty feedback
-    // const double penalty_fb = eval_hw->GetTrait(TRAIT_ID__PENALTY_FB);
-    // const double reward_fb = eval_hw->GetTrait(TRAIT_ID__REWARD_FB); 
-
-    // Incur penalty for collision!
+    // If collision, trial is over. 
     if (eval_hw->GetTrait(TRAIT_ID__COLLIDED)) {
-      phen.total_collisions++;
-      // phen.total_penalty_value += COLLISION_PENALTY;
       eval_hw->SetTrait(TRAIT_ID__DONE, 1);
+      phen.total_collisions++;
     }
     
     switch (last_action_id) {
@@ -1402,16 +1398,12 @@ void Experiment::DoConfig__Experiment() {
     if (AFTER_ACTION__SIGNAL) {
       TMaze::Cell & cell = maze.GetCell(eval_hw->GetTrait(TRAIT_ID__LOC));
       memory_t mem;
-      mem[EVENT_DATA_ID__VALUE] = cell.GetValue();
-      mem[EVENT_DATA_ID__PENALTY_FB] = eval_hw->GetTrait(TRAIT_ID__COLLIDED);
+      mem[EVENT_DATA_ID__VALUE] = eval_hw->GetTrait(TRAIT_ID__REWARD_VALUE); // NOTE: PROBLEM PROBLEM! This will be 0! We clear cells earlier. 
       eval_hw->TriggerEvent("MazeLocation", maze_tags[TMaze::GetCellType(cell.GetType())], mem);
     }
 
     // After action clean-up
-    eval_hw->SetTrait(TRAIT_ID__LAST_ACTION, ACTION_ID__NONE);
-    // eval_hw->SetTrait(TRAIT_ID__PENALTY_FB, 0);
-    eval_hw->SetTrait(TRAIT_ID__REWARD_FB, 0);
-        
+    eval_hw->SetTrait(TRAIT_ID__LAST_ACTION, ACTION_ID__NONE);        
   });
 
   end_agent_eval_sig.AddAction([this](agent_t & agent) {
@@ -1419,8 +1411,6 @@ void Experiment::DoConfig__Experiment() {
     phenotype_t & phen = phen_cache.Get(agentID, eval_id);
     // End of an evalution, should go ahead and record the score for this evaluation period.
     phen.score = phen.GetTotalCollectedResourceValue() - phen.GetTotalPenaltyValue();
-    // Reset hardware between trials. (clear queue, reset threads)
-    eval_hw->ResetHardware(AFTER_ACTION__WIPE_SHARED_MEM, AFTER_ACTION__CLEAR_FUNC_REF_MODS);
   });  
 
   // Configure selection
