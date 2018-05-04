@@ -354,7 +354,7 @@ protected:
         begin_agent_maze_trial_sig.Trigger(agent);
         do_agent_maze_trial_sig.Trigger(agent);
         end_agent_maze_trial_sig.Trigger(agent);
-        ++switch_time;
+        ++switch_clock;
       }
       end_agent_eval_sig.Trigger(agent);
     }
