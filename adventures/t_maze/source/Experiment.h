@@ -165,6 +165,20 @@ public:
       score = 0;
     }
 
+    void Print() {
+      std::cout << "--- PHENOTYPE ---" << std::endl;
+      std::cout << "total_collisions: " << total_collisions << std::endl;
+      std::cout << "total_maze_completions: " << total_maze_completions << std::endl;
+      std::cout << "total_resource_collections: " << total_resource_collections << std::endl;
+      std::cout << "total_collected_resource_value: " << total_collected_resource_value << std::endl;
+      std::cout << "total_penalty_value: " << total_penalty_value << std::endl;
+      std::cout << "total_rotcw: " << total_rotcw << std::endl;
+      std::cout << "total_rotccw: " << total_rotccw << std::endl;
+      std::cout << "total_forward: " << total_forward << std::endl;
+      std::cout << "total_actions: " << total_actions << std::endl;
+      std::cout << "score: " << score << std::endl;
+    }
+
   };
 
   class PhenotypeCache {
@@ -261,7 +275,7 @@ protected:
   // - SignalGP function regulation group
   size_t SIMILARITY_ADJUSTMENT_METHOD;
   size_t REF_MOD_ADJUSTMENT_TYPE;
-  size_t REF_MOD_ADJUSTMENT_VALUE;
+  double REF_MOD_ADJUSTMENT_VALUE;
   bool MODIFY_REG;
   // - SignalGP program group
   size_t SGP_PROG_MAX_FUNC_CNT;
@@ -377,6 +391,7 @@ protected:
     test_prog.PrintProgramFull();
     std::cout << " --------------------- " << std::endl;
     Agent test_hero(test_prog);
+    test_hero.SetID(0);
 
     do_agent_advance_sig.AddAction([this](agent_t & agent) {
       std::cout << "=== T: " << trial_time << " ===" << std::endl;
@@ -390,18 +405,38 @@ protected:
     // 2) Run program!
     maze.ResetRewards();
     maze.SwitchRewards();
+  
     eval_hw->SetProgram(test_prog);
     eval_hw->ResetHardware();
 
-    begin_agent_maze_trial_sig.Trigger(test_hero);
+    begin_agent_eval_sig.Trigger(test_hero);
+    size_t switch_clock = 0;
+    size_t switch_time = random->GetUInt(REWARD_SWITCH_TRIAL_MIN, REWARD_SWITCH_TRIAL_MAX);
+    for (maze_trial_id = 0; maze_trial_id < MAZE_TRIAL_CNT; ++maze_trial_id) {
+      std::cout << "================================ MAZE TRIAL: " << maze_trial_id << " ================================" << std::endl;
+      if (switch_clock >= switch_time) { 
+        std::cout << "--> Reward switch!" << std::endl;
+        maze.SwitchRewards();
+        switch_time = random->GetUInt(REWARD_SWITCH_TRIAL_MIN, REWARD_SWITCH_TRIAL_MAX);
+        switch_clock = 0; 
+      } 
+      std::cout << "Big reward location: " << maze.GetLargeRewardCellID() << std::endl;
+      
+      begin_agent_maze_trial_sig.Trigger(test_hero);
+      // - Print hardware state
+      std::cout << "=== INITIAL STATE ===" << std::endl;
+      eval_hw->PrintState();
+      do_agent_maze_trial_sig.Trigger(test_hero);
+      end_agent_maze_trial_sig.Trigger(test_hero);
+      ++switch_clock;
+      
+      std::cout << "------" << std::endl;
+    phenotype_t & phen = phen_cache.Get(0, maze_trial_id);
+    phen.Print(); 
+      
+    }
+    end_agent_eval_sig.Trigger(test_hero);
 
-    // - Print hardware state
-    std::cout << "=== INITIAL STATE ===" << std::endl;
-    eval_hw->PrintState();
-    
-    do_agent_maze_trial_sig.Trigger(test_hero);
-    
-    end_agent_maze_trial_sig.Trigger(test_hero);
 
     std::cout << "=== MAZE ===" << std::endl;
     maze.Print();
@@ -545,7 +580,7 @@ public:
       }
     }
 
-    // Test();
+    Test();
   }
 
   ~Experiment() {
@@ -1092,7 +1127,9 @@ void Experiment::DoConfig__Hardware() {
         else targetID = targets[random->GetUInt(targets.size())];
         program_t & program = hw.GetProgram();
         double cur_mod = program[targetID].GetRefModifier();
+        std::cout << cur_mod << std::endl;
         program[targetID].SetRefModifier(cur_mod + REF_MOD_ADJUSTMENT_VALUE);
+        std::cout << program[targetID].GetRefModifier() << std::endl;
       }, 0, "Up regulate target function. Use tag to determine function target.");
 
       inst_lib->AddInst("Repress", [this](hardware_t & hw, const inst_t & inst) {
