@@ -637,7 +637,15 @@ public:
   void Inst_RotCCW(hardware_t & hw, const inst_t & inst);
   // -- Sensor instructions --
   void Inst_GetCorridorLen(hardware_t & hw, const inst_t & inst);
+  
+  static void Inst_GetHeading(hardware_t & hw, const inst_t & inst);
+  static void Inst_IsNorth(hardware_t & hw, const inst_t & inst);
+  static void Inst_IsEast(hardware_t & hw, const inst_t & inst);
+  static void Inst_IsWest(hardware_t & hw, const inst_t & inst);
+  static void Inst_IsSouth(hardware_t & hw, const inst_t & inst); 
 
+  static void Inst_GetRewardValue(hardware_t & hw, const inst_t & inst);
+  
   // === SignalGP event handlers/dispatchers ===
   static void EventDispatch__MazeLocation(hardware_t & hw, const event_t & event);
   static void EventHandler__MazeLocation(hardware_t & hw, const event_t & event);
@@ -698,6 +706,37 @@ void Experiment::Inst_GetCorridorLen(hardware_t & hw, const inst_t & inst) {
   state_t & state = hw.GetCurState();
   state.SetLocal(inst.args[0], MAZE_CORRIDOR_LEN);
 }
+
+void Experiment::Inst_GetHeading(hardware_t & hw, const inst_t & inst) {
+  state_t & state = hw.GetCurState();
+  state.SetLocal(inst.args[0], hw.GetTrait(TRAIT_ID__FACING));
+}
+
+void Experiment::Inst_IsNorth(hardware_t & hw, const inst_t & inst) {
+  state_t & state = hw.GetCurState();
+  state.SetLocal(inst.args[0], TMaze::N == TMaze::GetFacing(hw.GetTrait(TRAIT_ID__FACING)));
+}
+
+void Experiment::Inst_IsEast(hardware_t & hw, const inst_t & inst) {
+  state_t & state = hw.GetCurState();
+  state.SetLocal(inst.args[0], TMaze::E == TMaze::GetFacing(hw.GetTrait(TRAIT_ID__FACING)));
+}
+
+void Experiment::Inst_IsWest(hardware_t & hw, const inst_t & inst) {
+  state_t & state = hw.GetCurState();
+  state.SetLocal(inst.args[0], TMaze::W == TMaze::GetFacing(hw.GetTrait(TRAIT_ID__FACING)));
+}
+
+void Experiment::Inst_IsSouth(hardware_t & hw, const inst_t & inst) {
+  state_t & state = hw.GetCurState();
+  state.SetLocal(inst.args[0], TMaze::S == TMaze::GetFacing(hw.GetTrait(TRAIT_ID__FACING)));
+}
+
+void Experiment::Inst_GetRewardValue(hardware_t & hw, const inst_t & inst) {
+  state_t & state = hw.GetCurState();
+  state.SetLocal(inst.args[0], hw.GetTrait(TRAIT_ID__REWARD_VALUE));
+}
+
 
 // ================== Event definition implementations ==================
 void Experiment::EventDispatch__MazeLocation(hardware_t & hw, const event_t & event) {
@@ -1114,6 +1153,34 @@ void Experiment::DoConfig__Hardware() {
   inst_lib->AddInst("GetCorridorLen", [this](hardware_t & hw, const inst_t & inst) {
     this->Inst_GetCorridorLen(hw, inst);
   }, 1, "WM[ARG0] = CORRIDOR LENGTH");
+
+  inst_lib->AddInst("GetHeading", Inst_GetHeading, 1, "WM[ARG0] = current heading (N=0, E=1, S=2, or W=3)");
+  inst_lib->AddInst("IsNorth", Inst_IsNorth, 1, "WM[ARG0] = Is current facing North?");
+  inst_lib->AddInst("IsEast", Inst_IsEast, 1, "WM[ARG0] = Is current facing East?");
+  inst_lib->AddInst("IsWest", Inst_IsWest, 1, "WM[ARG0] = Is current facing West?");
+  inst_lib->AddInst("IsSouth", Inst_IsSouth, 1, "WM[ARG0] = Is current facing South?");
+
+  inst_lib->AddInst("GetRewardValue", Inst_GetRewardValue, 1, "WM[ARG0] = currently collected reward value");
+
+  if (POLLING_SENSORS) {
+    // Add a polling sensor for each location type. 
+    for (size_t loc_id = 0; loc_id < TMaze::NUM_CELL_TYPES; ++loc_id) {
+      TMaze::CellType cell_type = TMaze::GetCellType(loc_id);
+      inst_lib->AddInst("IsLocType-"+TMaze::CellTypeToString(cell_type), [loc_id](hardware_t & hw, const inst_t & inst) {
+        state_t & state = hw.GetCurState();
+        state.SetLocal(inst.args[0], (int)(loc_id == hw.GetTrait(TRAIT_ID__LOC)));
+      }, 1, "WM[ARG0] = Is current location of type " + emp::to_string(loc_id) + "?");
+    }
+  } else {
+    // Add nop polling sensors for each location type.
+    for (size_t loc_id = 0; loc_id < TMaze::NUM_CELL_TYPES; ++loc_id) {
+      TMaze::CellType cell_type = TMaze::GetCellType(loc_id);
+      inst_lib->AddInst("IsLocType-"+TMaze::CellTypeToString(cell_type)+"-Nop", [loc_id](hardware_t & hw, const inst_t & inst) {
+        state_t & state = hw.GetCurState();
+        state.SetLocal(inst.args[0], (int)(loc_id == hw.GetTrait(TRAIT_ID__LOC)));
+      }, 1, "WM[ARG0] = Is current location of type " + emp::to_string(loc_id) + "?");
+    }
+  }
 
   // Regulatory instructions
   switch(REF_MOD_ADJUSTMENT_TYPE) {

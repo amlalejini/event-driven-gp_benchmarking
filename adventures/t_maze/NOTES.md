@@ -77,9 +77,7 @@ The learn-N solution relies entirely on function regulation to solve the t-maze 
 - Solve problem: bootstrapping movement (no incentive to move in maze)
   - Could switch from Rotation ==> Rotation + forward
   - A 'do nothing' penalty
-- Add GetHeading Sensor
-- Add location polling sensors
-- GetRewValue instruction
+- Test new instructions (sensors)
 
 
 # References
