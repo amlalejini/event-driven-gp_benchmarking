@@ -402,6 +402,8 @@ protected:
       eval_hw->PrintState();
     });
 
+    eval_id = 0;
+
     // 2) Run program!
     maze.ResetRewards();
     maze.SwitchRewards();
@@ -1091,7 +1093,7 @@ void Experiment::DoConfig__Hardware() {
   inst_lib->AddInst("Nop", hardware_t::Inst_Nop, 0, "No operation.");
   
   inst_lib->AddInst("Call", Inst_Call, 0, "Call function that best matches call affinity.", emp::ScopeType::BASIC, 0, {"affinity"});
-  inst_lib->AddInst("Fork", Inst_Fork, 0, "Fork a new thread. Local memory contents of callee are loaded into forked thread's input memory.");
+  inst_lib->AddInst("Fork", Inst_Fork, 0, "Fork a new thread. Local memory contents of callee are loaded into forked thread's input memory.", emp::ScopeType::BASIC, 0, {"affinity"});
   inst_lib->AddInst("Terminate", Inst_Terminate, 0, "Kill current thread.");
 
   // Actuation instructions
@@ -1127,7 +1129,7 @@ void Experiment::DoConfig__Hardware() {
         program_t & program = hw.GetProgram();
         double cur_mod = program[targetID].GetRefModifier();
         program[targetID].SetRefModifier(cur_mod + REF_MOD_ADJUSTMENT_VALUE);
-      }, 0, "Up regulate target function. Use tag to determine function target.");
+      }, 0, "Up regulate target function. Use tag to determine function target.", emp::ScopeType::BASIC, 0, {"affinity"});
 
       inst_lib->AddInst("Repress", [this](hardware_t & hw, const inst_t & inst) {
         emp::vector<size_t> targets(hw.FindBestFuncMatch(inst.affinity, 0.0, MODIFY_REG));
@@ -1138,7 +1140,7 @@ void Experiment::DoConfig__Hardware() {
         program_t & program = hw.GetProgram();
         double cur_mod = program[targetID].GetRefModifier();
         program[targetID].SetRefModifier(cur_mod - REF_MOD_ADJUSTMENT_VALUE);
-      }, 0, "Down regulate target function. Use tag to determine function target.");
+      }, 0, "Down regulate target function. Use tag to determine function target.", emp::ScopeType::BASIC, 0, {"affinity"});
 
       break;
     }
@@ -1155,7 +1157,7 @@ void Experiment::DoConfig__Hardware() {
         program_t & program = hw.GetProgram();
         double cur_mod = program[targetID].GetRefModifier();
         program[targetID].SetRefModifier(cur_mod * REF_MOD_ADJUSTMENT_VALUE);
-      }, 0, "Up regulate target function. Use tag to determine function target.");
+      }, 0, "Up regulate target function. Use tag to determine function target.", emp::ScopeType::BASIC, 0, {"affinity"});
 
       inst_lib->AddInst("Repress", [this](hardware_t & hw, const inst_t & inst) {
         emp::vector<size_t> targets(hw.FindBestFuncMatch(inst.affinity, 0.0, MODIFY_REG));
@@ -1166,7 +1168,7 @@ void Experiment::DoConfig__Hardware() {
         program_t & program = hw.GetProgram();
         double cur_mod = program[targetID].GetRefModifier();
         program[targetID].SetRefModifier(cur_mod * (1/REF_MOD_ADJUSTMENT_VALUE));
-      }, 0, "Down regulate target function. Use tag to determine function target.");
+      }, 0, "Down regulate target function. Use tag to determine function target.", emp::ScopeType::BASIC, 0, {"affinity"});
       
       break;
     }
@@ -1432,7 +1434,7 @@ void Experiment::DoConfig__Experiment() {
     if (AFTER_ACTION__SIGNAL) {
       TMaze::Cell & cell = maze.GetCell(eval_hw->GetTrait(TRAIT_ID__LOC));
       memory_t mem;
-      mem[EVENT_DATA_ID__VALUE] = eval_hw->GetTrait(TRAIT_ID__REWARD_VALUE); // NOTE: PROBLEM PROBLEM! This will be 0! We clear cells earlier. 
+      mem[EVENT_DATA_ID__VALUE] = eval_hw->GetTrait(TRAIT_ID__REWARD_VALUE); 
       eval_hw->TriggerEvent("MazeLocation", maze_tags[TMaze::GetCellType(cell.GetType())], mem);
     }
 
