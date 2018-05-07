@@ -70,8 +70,6 @@ The learn-N solution tries the right side of the maze first. If the right side d
 The learn-N solution relies entirely on function regulation to solve the t-maze problem. 
 
 # TODOs
-- Test full evaluation (single/multiple trials)
-- Add big/small reward cnt tracking
 - handcode solutions that use different strategies:
   - shared memory
 - Solve problem: bootstrapping movement (no incentive to move in maze)

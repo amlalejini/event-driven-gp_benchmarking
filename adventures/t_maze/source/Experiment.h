@@ -119,6 +119,8 @@ public:
     size_t total_collisions;
     size_t total_maze_completions;
     size_t total_resource_collections;
+    size_t total_large_reward_collections;
+    size_t total_small_reward_collections;
     double total_collected_resource_value;
     double total_penalty_value;
     size_t total_rotcw;
@@ -132,6 +134,8 @@ public:
       : total_collisions(0),
         total_maze_completions(0),
         total_resource_collections(0),
+        total_large_reward_collections(0),
+        total_small_reward_collections(0),
         total_collected_resource_value(0),
         total_penalty_value(0),
         total_rotcw(0),
@@ -144,6 +148,8 @@ public:
     size_t GetTotalCollisions() const { return total_collisions; }
     size_t GetTotalMazeCompletions() const { return total_maze_completions; }
     size_t GetTotalResourceCollections() const { return total_resource_collections; }
+    size_t GetTotalLargeResourceCollections() const { return total_large_reward_collections; }
+    size_t GetTotalSmallResourceCollections() const { return total_small_reward_collections; }
     double GetTotalCollectedResourceValue() const { return total_collected_resource_value; }
     double GetTotalPenaltyValue() const { return total_penalty_value; }
     size_t GetTotalRotCW() const { return total_rotcw; }
@@ -157,6 +163,8 @@ public:
       total_maze_completions = 0;
       total_resource_collections = 0;
       total_collected_resource_value = 0;
+      total_large_reward_collections = 0;
+      total_small_reward_collections = 0;
       total_penalty_value = 0;
       total_rotcw = 0;
       total_rotccw = 0;
@@ -170,6 +178,8 @@ public:
       std::cout << "total_collisions: " << total_collisions << std::endl;
       std::cout << "total_maze_completions: " << total_maze_completions << std::endl;
       std::cout << "total_resource_collections: " << total_resource_collections << std::endl;
+      std::cout << "total_large_resource_collections: " << total_large_reward_collections << std::endl;
+      std::cout << "total_small_resource_collections: " << total_small_reward_collections << std::endl;
       std::cout << "total_collected_resource_value: " << total_collected_resource_value << std::endl;
       std::cout << "total_penalty_value: " << total_penalty_value << std::endl;
       std::cout << "total_rotcw: " << total_rotcw << std::endl;
@@ -878,6 +888,18 @@ emp::DataFile & Experiment::AddDominantFile(const std::string & fpath) {
   };
   file.AddFun(get_total_rew_collections, "total_reward_collection_cnt", "Total number of time reward was collected");
 
+  std::function<size_t(void)> get_total_lrew_collections = [this]() {
+    phenotype_t & phen = phen_cache.GetRepresentative(dom_agent_id);
+    return phen.GetTotalLargeResourceCollections();    
+  };
+  file.AddFun(get_total_lrew_collections, "total_large_reward_collection_cnt", "Total number of times large reward was collected");
+
+  std::function<size_t(void)> get_total_srew_collections = [this]() {
+    phenotype_t & phen = phen_cache.GetRepresentative(dom_agent_id);
+    return phen.GetTotalSmallResourceCollections();    
+  };
+  file.AddFun(get_total_srew_collections, "total_small_reward_collection_cnt", "Total number of times small reward was collected");
+
   std::function<double(void)> get_total_collected_value = [this]() {
     phenotype_t & phen = phen_cache.GetRepresentative(dom_agent_id);
     return phen.GetTotalCollectedResourceValue();    
@@ -1366,7 +1388,7 @@ void Experiment::DoConfig__Experiment() {
     //  - Do we reset function reference modifiers between trials?
     eval_hw->ResetHardware(AFTER_MAZE_TRIAL__WIPE_SHARED_MEM, AFTER_MAZE_TRIAL__CLEAR_FUNC_REF_MODS);
 
-    TMaze::Cell & start_cell = maze.GetCell(maze.GetStartCellID());
+    // TMaze::Cell & start_cell = maze.GetCell(maze.GetStartCellID());
 
     // Configure traits for trail.    
     eval_hw->SetTrait(TRAIT_ID__LOC, maze.GetStartCellID());  // Set location trait.
@@ -1436,7 +1458,7 @@ void Experiment::DoConfig__Experiment() {
     eval_hw->SingleProcess();
   });
 
-  // Gets triggered when an agent goes to a new location... TODO: finish, incorporate memory wiping, etc
+  // Gets triggered when an agent goes to a new location...
   maze_location_sig.AddAction([this](agent_t & agent) {
     // Get the phenotype (to be adjusted)
     const size_t agentID = agent.GetID();
@@ -1454,8 +1476,16 @@ void Experiment::DoConfig__Experiment() {
       // TODO: double check that this only happens ONCE per trial
       eval_hw->SetTrait(TRAIT_ID__REWARD_VALUE, cell_value);
       eval_hw->SetTrait(TRAIT_ID__REWARD_COLLECTED, 1);
+
+      if (cell_value == maze.GetLargeRewardValue()) {
+        phen.total_large_reward_collections++;
+      } else {
+        phen.total_small_reward_collections++;
+      }
+
       phen.total_resource_collections++;
       phen.total_collected_resource_value += cell_value;
+
       maze.ClearCellValues();
     } else {
       phen.total_collected_resource_value += cell_value;
