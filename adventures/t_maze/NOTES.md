@@ -44,6 +44,8 @@ How should agents actuate? I.e., how should agents move through the maze? Again,
 - GetRewValue instruction
 - Solve problem: bootstrapping movement (no incentive to move in maze
   - Could switch from Rotation ==> Rotation + forward
+  - A 'do nothing' penalty
+- Add GetHeading Sensor
 
 # References
 Soltoggio, A., Bullinaria, J. A., Mattiussi, C., Dürr, P., & Floreano, D. (2008). Evolutionary Advantages of Neuromodulated Plasticity in Dynamic, Reward-based Scenarios. Artificial Life XI: Proceedings of the 11th International Conference on Simulation and Synthesis of Living Systems (ALIFE 2008), 2, 569–576. https://doi.org/10.1.1.210.6989

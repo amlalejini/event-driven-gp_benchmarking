@@ -431,9 +431,8 @@ protected:
       ++switch_clock;
       
       std::cout << "------" << std::endl;
-    phenotype_t & phen = phen_cache.Get(0, maze_trial_id);
-    phen.Print(); 
-      
+      phenotype_t & phen = phen_cache.Get(0, 0);
+      phen.Print(); 
     }
     end_agent_eval_sig.Trigger(test_hero);
 
@@ -1127,9 +1126,7 @@ void Experiment::DoConfig__Hardware() {
         else targetID = targets[random->GetUInt(targets.size())];
         program_t & program = hw.GetProgram();
         double cur_mod = program[targetID].GetRefModifier();
-        std::cout << cur_mod << std::endl;
         program[targetID].SetRefModifier(cur_mod + REF_MOD_ADJUSTMENT_VALUE);
-        std::cout << program[targetID].GetRefModifier() << std::endl;
       }, 0, "Up regulate target function. Use tag to determine function target.");
 
       inst_lib->AddInst("Repress", [this](hardware_t & hw, const inst_t & inst) {
