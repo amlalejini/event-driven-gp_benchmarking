@@ -323,6 +323,8 @@ protected:
   size_t update;    ///< Current update (generation) of experiment
   size_t eval_id;   ///< Current trial of current evaluation. (only meaningful during an agent evaluation)
   size_t maze_trial_id; ///< Current maze trial within a single evaluation. 
+
+  emp::vector<size_t> switch_trial_by_eval;
   
   size_t trial_time; ///< Current time within a maze_trial. 
   size_t trial_step; ///< Current 'action step' of trial. 
@@ -367,18 +369,11 @@ protected:
   void Evaluate(agent_t & agent) {
     for (eval_id = 0; eval_id < EVALUATION_CNT; ++eval_id) {
       begin_agent_eval_sig.Trigger(agent);
-      size_t switch_clock = 0;
-      size_t switch_time = random->GetUInt(REWARD_SWITCH_TRIAL_MIN, REWARD_SWITCH_TRIAL_MAX);
       for (maze_trial_id = 0; maze_trial_id < MAZE_TRIAL_CNT; ++maze_trial_id) {
-        if (switch_clock >= switch_time) { 
-          maze.SwitchRewards();
-          switch_time = random->GetUInt(REWARD_SWITCH_TRIAL_MIN, REWARD_SWITCH_TRIAL_MAX);
-          switch_clock = 0; 
-        } 
+        if (maze_trial_id == switch_trial_by_eval[maze_trial_id]) { maze.SwitchRewards(); }
         begin_agent_maze_trial_sig.Trigger(agent);
         do_agent_maze_trial_sig.Trigger(agent);
         end_agent_maze_trial_sig.Trigger(agent);
-        ++switch_clock;
       }
       end_agent_eval_sig.Trigger(agent);
     }
@@ -536,6 +531,9 @@ public:
 
     // Configure the phenotype cache. 
     phen_cache.Resize(POP_SIZE, EVALUATION_CNT); 
+
+    // Configure the switch trial by eval
+    switch_trial_by_eval.resize(EVALUATION_CNT, 0);
 
     if (EVALUATION_CNT < 1) {
       std::cout << "Cannot run experiment with EVALUATION_CNT < 1. Exiting..." << std::endl;
@@ -1339,6 +1337,11 @@ void Experiment::DoConfig__Experiment() {
     double best_score = MIN_POSSIBLE_SCORE;
     dom_agent_id = 0;
 
+    // Set switch times for this generation. 
+    for (size_t eID = 0; eID < EVALUATION_CNT; ++eID) {
+      switch_trial_by_eval[eID] = random->GetUInt(REWARD_SWITCH_TRIAL_MIN, REWARD_SWITCH_TRIAL_MAX);
+    }
+    
     for (size_t id = 0; id < world->GetSize(); ++id) {
       // Load and configure agent
       agent_t & our_hero = world->GetOrg(id);
