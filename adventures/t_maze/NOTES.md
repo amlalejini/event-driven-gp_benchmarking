@@ -26,14 +26,14 @@ General note: the experiment implementation is implemented as a web of Empirical
 
 **Sensing** <br>
 How do agents sense their location in the grid? There are a few sensing options that could be made available to agents:
-- Auto-trigger events (corresponding to current grid position) everytime we need an action (i.e. actions are given in response to events). E.g., there would be an initial 'start' event, and every time the agent performs an action before time is up, there would be an event corresponding to the grid cell the agent is currently occupying. Or, only trigger an event when an event moves to a *new* cell. 
-- Sense-trigger events. Events (corresponding to the current grid position) are triggered at the request of a SignalGP agent via the execution of an instruction. 
-- Sense instruction. Executing an instruction provides sensory information in memory locations specified by instruction-arguments. 
+- Auto-trigger events (corresponding to current grid position) everytime we need an action (i.e. actions are given in response to events). E.g., there would be an initial 'start' event, and every time the agent performs an action before time is up, there would be an event corresponding to the grid cell the agent is currently occupying. Or, only trigger an event when an event moves to a *new* cell. **[implemented]**
+- Sense-trigger events. Events (corresponding to the current grid position) are triggered at the request of a SignalGP agent via the execution of an instruction. **[not implemented]**
+- Sense instruction. Executing an instruction provides sensory information in memory locations specified by instruction-arguments. **[implemented]**
 
 **Actuation** <br>
 How should agents actuate? I.e., how should agents move through the maze? Again, a few options:
-- Give T total time where agents are always executing instructions. When an agent executes an actuation instruction, the actuation is done, and execution continues (events may be triggered, etc). 
-- Treat the SignalGP agents more like neural networks. Give them T time steps *per-actuation*. Between actuations, kill all active threads. We can wipe/not wipe shared memory and function reference modifiers (function regulation). 
+- Give T total time where agents are always executing instructions. When an agent executes an actuation instruction, the actuation is done, and execution continues (events may be triggered, etc). **[implemented]**
+- Treat the SignalGP agents more like neural networks. Give them T time steps *per-actuation*. Between actuations, kill all active threads. We can wipe/not wipe shared memory and function reference modifiers (function regulation). **[implemented]**
 
 # Handcoded Solutions
 **Briefly, why?** <br>
@@ -69,6 +69,24 @@ The learn-N solution tries the right side of the maze first. If the right side d
 
 The learn-N solution relies entirely on function regulation to solve the t-maze problem. 
 
+# Exploratory Experiments
+Here, my goal is to use the t-maze task to explore SignalGP function regulation and the capacity for SignalGP programs to perform learning tasks more generally. 
+
+The job submission scripts/configs for the initial, exploratory experiments can be found in [hpcc_jobs/exploratory](hpcc_jobs/exploratory). 
+
+**Conditions to explore:**
+- Tag width (bits): 16, 32
+- Between-trial memory:
+  - After a trial, clear both shared memory and function regulatory modifiers
+  - After a trial, clear only shared memory
+  - After a trial, clear only function regulatory modifiers
+  - After a trial, clear neither shared memory nor function regulatory modifiers
+
+In conditions w/function regulation:
+- Vary the magnitude of regulatory adjustments: 6.25%, 12.5%, 25%
+- Vary minimum similarity threshold: 0%, 50%, 75%
+
+
 # TODOs
 - handcode solutions that use different strategies:
   - shared memory
@@ -76,6 +94,7 @@ The learn-N solution relies entirely on function regulation to solve the t-maze 
   - Could switch from Rotation ==> Rotation + forward
   - A 'do nothing' penalty
 - Test new instructions (sensors)
+- Exploratory experiments! 
 
 
 # References
