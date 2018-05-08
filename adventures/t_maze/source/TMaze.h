@@ -76,10 +76,12 @@ class TMaze {
       std::unordered_map<Facing, size_t> neighbors;
       CellType type;
       double value;
+      double distance_to_start;
 
       const std::unordered_map<Facing, size_t> & GetNeighbors() const { return neighbors; }
       CellType GetType() const { return type; }
       double GetValue() const { return value; }
+      double GetDistToStart() const { return distance_to_start; }
 
       bool HasNeighbor(Facing dir) const {
         return emp::Has(neighbors, dir);
@@ -106,16 +108,21 @@ class TMaze {
     double small_reward_val;
     double large_reward_val;
 
+    double max_distance_from_start;
+
     double base_value; ///< Base value of all cells except reward cells.
 
     void BuildMaze() {
       size_t maze_id = 0;
+      double dist = 0;
 
       // Build bottom part of T: start --> corridor
       Cell & start_cell = maze[maze_id];
       start_cell_id = maze_id;
       start_cell.type = CellType::START;
+      start_cell.distance_to_start = dist;
       
+      dist += 1.0;
       ++maze_id; // Move to next cell. 
       start_cell.neighbors.emplace(Facing::N, maze_id);
       
@@ -123,7 +130,9 @@ class TMaze {
       for (size_t cID = 0; cID < corridor_len; ++cID) {
         Cell & corridor_cell = maze[maze_id]; 
         corridor_cell.type = CellType::CORRIDOR;
+        corridor_cell.distance_to_start = dist;
         corridor_cell.neighbors.emplace(Facing::S, maze_id-1);
+        dist += 1.0;
         ++maze_id;
         corridor_cell.neighbors.emplace(Facing::N, maze_id);  
       }
@@ -132,7 +141,9 @@ class TMaze {
       Cell & junction_cell = maze[maze_id];
       junction_cell_id = maze_id;
       junction_cell.type = CellType::DECISION;
+      junction_cell.distance_to_start = dist;
       junction_cell.neighbors.emplace(Facing::S, maze_id-1);
+      dist += 1;
       ++maze_id; // Move to next cell (we'll build left, then right)
       junction_cell.neighbors.emplace(Facing::W, maze_id);
 
@@ -140,8 +151,10 @@ class TMaze {
       for (size_t cID = 0; cID < corridor_len; ++cID) {
         Cell & corridor_cell = maze[maze_id];
         corridor_cell.type = CellType::CORRIDOR;
+        corridor_cell.distance_to_start = dist;
         corridor_cell.neighbors.emplace(Facing::E, maze_id-1);
         ++maze_id;
+        dist += 1;
         corridor_cell.neighbors.emplace(Facing::W, maze_id);
       }
 
@@ -150,15 +163,20 @@ class TMaze {
       reward_cell_ids[0] = maze_id;
       rew_cell1.type = CellType::REWARD;
       rew_cell1.neighbors.emplace(Facing::E, maze_id-1);
+      rew_cell1.distance_to_start = dist;
       ++maze_id;
+      dist += 1;
 
       // Build upper-right corridor (R<----[D--EAST-->R])
       junction_cell.neighbors.emplace(Facing::E, maze_id);
+      dist = junction_cell.GetDistToStart() + 1;
       for (size_t cID = 0; cID < corridor_len; ++cID) {
         Cell & corridor_cell = maze[maze_id];
         corridor_cell.type = CellType::CORRIDOR;
         corridor_cell.neighbors.emplace(Facing::W, ((cID) ? (maze_id - 1) : junction_cell_id) );//junction_cell_id+cID);
+        corridor_cell.distance_to_start = dist;
         ++maze_id;
+        dist += 1.0;
         corridor_cell.neighbors.emplace(Facing::E, maze_id);
       }
 
@@ -167,6 +185,9 @@ class TMaze {
       reward_cell_ids[1] = maze_id;
       rew_cell2.type = CellType::REWARD;
       rew_cell2.neighbors.emplace(Facing::W, maze_id-1);
+      rew_cell2.distance_to_start = dist;
+
+      max_distance_from_start = dist; 
 
       large_reward_cell_id = reward_cell_ids[0];
       // TODO: set reward
@@ -182,7 +203,9 @@ class TMaze {
         large_reward_cell_id(0),
         start_cell_id(0),
         junction_cell_id(0),
-        small_reward_val(_s_reward_val), large_reward_val(_l_reward_val), base_value(_b_val)
+        small_reward_val(_s_reward_val), large_reward_val(_l_reward_val), 
+        max_distance_from_start(0),
+        base_value(_b_val)
     { 
       BuildMaze(); 
     }
@@ -199,6 +222,8 @@ class TMaze {
     double GetSmallRewardValue() const { return small_reward_val; }
     double GetLargeRewardValue() const { return large_reward_val; }
     double GetBaseValue() const { return base_value; }
+
+    double GetMaxDistFromStart() const { return max_distance_from_start; }
 
     Cell & GetCell(size_t id) {
       emp_assert(id < maze.size());
@@ -257,6 +282,7 @@ class TMaze {
         Cell & cell = maze[i];
         os << "  Cell type: " << CellTypeToString(cell.type) << "\n";
         os << "  Cell value: " << cell.value << "\n";
+        os << "  Dist to start: " << cell.GetDistToStart() << "\n";
         os << "  Neighbors:";
         for (size_t n = 0; n < NUM_DIRECTIONS; ++n) {
           Facing facing = GetFacing(n);

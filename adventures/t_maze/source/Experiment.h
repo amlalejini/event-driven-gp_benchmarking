@@ -1410,10 +1410,17 @@ void Experiment::DoConfig__Experiment() {
 
   end_agent_maze_trial_sig.AddAction([this](agent_t & agent) {
     // If you end the trial w/out completing the maze (out of time or you collided), suffer!
+    const size_t agentID = agent.GetID();
+    phenotype_t & phen = phen_cache.Get(agentID, eval_id);
+
     if (!eval_hw->GetTrait(TRAIT_ID__COMPLETED_MAZE)) {
-      const size_t agentID = agent.GetID();
-      phenotype_t & phen = phen_cache.Get(agentID, eval_id);
       phen.total_penalty_value += MAZE_INCOMPLETE_PENALTY;
+    }
+
+    // If the agent managed to collect a reward, give a small bonus for how close they managed to get back to the beginning of the maze.
+    if (eval_hw->GetTrait(TRAIT_ID__REWARD_COLLECTED)) {
+      phen.total_collected_resource_value += maze.GetMaxDistFromStart() - maze.GetCell(eval_hw->GetTrait(TRAIT_ID__LOC)).GetDistToStart();
+      // std::cout << "Here's how far the agent ended from start: " << maze.GetCell(eval_hw->GetTrait(TRAIT_ID__LOC)).GetDistToStart() << std::endl;
     }
   });
 
@@ -1498,6 +1505,7 @@ void Experiment::DoConfig__Experiment() {
       eval_hw->SetTrait(TRAIT_ID__COMPLETED_MAZE, 1);
       phen.total_maze_completions++;
     }
+
     // TODO: check resource collection type!
 
     // If collision, trial is over. 
