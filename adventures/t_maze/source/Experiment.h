@@ -48,7 +48,8 @@ constexpr size_t MAZE_TRIAL_EXECUTION_METHOD_ID__STEPS = 1;
 constexpr size_t MAZE_CELL_TAG_GENERATION_METHOD_ID__RAND = 0;
 constexpr size_t MAZE_CELL_TAG_GENERATION_METHOD_ID__LOAD = 1;
 
-constexpr size_t TAG_WIDTH = 16;
+// constexpr size_t TAG_WIDTH = 16;
+constexpr size_t TAG_WIDTH = 32;
 
 constexpr size_t TRAIT_ID__LOC = 0;
 constexpr size_t TRAIT_ID__FACING = 1;
@@ -370,7 +371,9 @@ protected:
     for (eval_id = 0; eval_id < EVALUATION_CNT; ++eval_id) {
       begin_agent_eval_sig.Trigger(agent);
       for (maze_trial_id = 0; maze_trial_id < MAZE_TRIAL_CNT; ++maze_trial_id) {
-        if (maze_trial_id == switch_trial_by_eval[maze_trial_id]) { maze.SwitchRewards(); }
+        if (maze_trial_id == switch_trial_by_eval[eval_id]) { 
+          maze.SwitchRewards(); 
+        }
         begin_agent_maze_trial_sig.Trigger(agent);
         do_agent_maze_trial_sig.Trigger(agent);
         end_agent_maze_trial_sig.Trigger(agent);
@@ -1420,11 +1423,19 @@ void Experiment::DoConfig__Experiment() {
       phen.total_penalty_value += MAZE_INCOMPLETE_PENALTY;
     }
 
+    // We'll give a bonus for going toward the reward and for moving toward the start after collecting a reward.
+
+    double dist_to_start = maze.GetCell(eval_hw->GetTrait(TRAIT_ID__LOC)).GetDistToStart(); 
+
     // If the agent managed to collect a reward, give a small bonus for how close they managed to get back to the beginning of the maze.
     if (eval_hw->GetTrait(TRAIT_ID__REWARD_COLLECTED)) {
-      phen.total_collected_resource_value += maze.GetMaxDistFromStart() - maze.GetCell(eval_hw->GetTrait(TRAIT_ID__LOC)).GetDistToStart();
-      // std::cout << "Here's how far the agent ended from start: " << maze.GetCell(eval_hw->GetTrait(TRAIT_ID__LOC)).GetDistToStart() << std::endl;
-    }
+      phen.total_collected_resource_value += maze.GetMaxDistFromStart() - dist_to_start;
+      phen.total_collected_resource_value += maze.GetMaxDistFromStart(); // For reaching the reward. 
+    } else {
+      // Reward moving toward the reward. 
+      phen.total_collected_resource_value += maze.GetMaxDistFromStart() - (maze.GetMaxDistFromStart() - dist_to_start);
+    } 
+    
   });
 
   // Configure trial execution
