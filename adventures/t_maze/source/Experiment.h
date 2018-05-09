@@ -1399,12 +1399,13 @@ void Experiment::DoConfig__Experiment() {
     // Configure traits for trail.    
     eval_hw->SetTrait(TRAIT_ID__LOC, maze.GetStartCellID());  // Set location trait.
     eval_hw->SetTrait(TRAIT_ID__FACING, TMaze::GetFacing(TMaze::Facing::N)); // Set heading trait.
+    eval_hw->SetTrait(TRAIT_ID__LAST_ACTION, ACTION_ID__NONE);
     eval_hw->SetTrait(TRAIT_ID__REWARD_COLLECTED, 0);
     eval_hw->SetTrait(TRAIT_ID__REWARD_VALUE, 0);
     eval_hw->SetTrait(TRAIT_ID__COLLIDED, 0);
     eval_hw->SetTrait(TRAIT_ID__DONE, 0);
     eval_hw->SetTrait(TRAIT_ID__COMPLETED_MAZE, 0);
-    
+        
     // Trigger START signal
     maze_location_sig.Trigger(agent);
     memory_t mem;
@@ -1429,12 +1430,21 @@ void Experiment::DoConfig__Experiment() {
 
     // If the agent managed to collect a reward, give a small bonus for how close they managed to get back to the beginning of the maze.
     if (eval_hw->GetTrait(TRAIT_ID__REWARD_COLLECTED)) {
+      // std::cout << "Reward collected!" << std::endl;
+      // std::cout << "  Location: " << eval_hw->GetTrait(TRAIT_ID__LOC) << std::endl;
+      // std::cout << "  Reward for dist to start: " << maze.GetMaxDistFromStart() - dist_to_start << std::endl;
+      // std::cout << "  Reward for reaching reward: " << maze.GetMaxDistFromStart() << std::endl;
       phen.total_collected_resource_value += maze.GetMaxDistFromStart() - dist_to_start;
       phen.total_collected_resource_value += maze.GetMaxDistFromStart(); // For reaching the reward. 
     } else {
       // Reward moving toward the reward. 
+      // std::cout << "Did not reach a reward." << std::endl;
+      // std::cout << "  Location: " << eval_hw->GetTrait(TRAIT_ID__LOC) << std::endl;
+      // std::cout << "  Reward for location: " << maze.GetMaxDistFromStart() - (maze.GetMaxDistFromStart() - dist_to_start) << std::endl;
       phen.total_collected_resource_value += maze.GetMaxDistFromStart() - (maze.GetMaxDistFromStart() - dist_to_start);
     } 
+
+    // phen.score = phen.total_collected_resource_value - phen.total_penalty_value;
     
   });
 
