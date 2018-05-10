@@ -45,6 +45,8 @@ constexpr size_t SIMILARITY_ADJUSTMENT_METHOD_ID__MULT = 1;
 constexpr size_t SIGNAL_RESPONSE_MAPPING_CHANGE_METHOD_ID__RAND = 0;
 constexpr size_t SIGNAL_RESPONSE_MAPPING_CHANGE_METHOD_ID__HALF = 1;
 
+constexpr size_t SELECTION_METHOD_ID__TOURNAMENT = 0;
+
 constexpr size_t TAG_WIDTH = 16;
 
 constexpr double MIN_POSSIBLE_SCORE = -32767;
@@ -245,9 +247,9 @@ protected:
   emp::Signal<void(agent_t &)> begin_agent_eval_sig;  ///< Triggered at beginning of agent evaluation (might be multiple trials)
   emp::Signal<void(agent_t &)> end_agent_eval_sig;  ///< Triggered at beginning of agent evaluation (might be multiple trials)
 
-  emp::Signal<void(agent_t &)> begin_agent_maze_trial_sig; ///< Triggered at the beginning of an agent trial.
-  emp::Signal<void(agent_t &)> do_agent_maze_trial_sig; ///< Triggered at the beginning of an agent trial.
-  emp::Signal<void(agent_t &)> end_agent_maze_trial_sig; ///< Triggered at the beginning of an agent trial.
+  emp::Signal<void(agent_t &)> begin_agent_trial_sig; ///< Triggered at the beginning of an agent trial.
+  emp::Signal<void(agent_t &)> do_agent_trial_sig; ///< Triggered at the beginning of an agent trial.
+  emp::Signal<void(agent_t &)> end_agent_trial_sig; ///< Triggered at the beginning of an agent trial.
 
   emp::Signal<void(agent_t &)> do_agent_advance_sig;
   emp::Signal<void(agent_t &)> after_agent_action_sig;
@@ -786,7 +788,40 @@ void Experiment::DoConfig__Experiment() {
 
   });
 
-  
+  do_world_update_sig.AddAction([this]() {
+    world->Update();
+    world->DoMutations(ELITE_SELECT__ELITE_CNT);
+  });
+
+  begin_agent_eval_sig.AddAction([this](agent_t & agent) {
+
+  });
+
+  end_agent_eval_sig.AddAction([this](agent_t & agent) {
+
+  });
+
+  begin_agent_trial_sig.AddAction([this](agent_t & agent) {
+
+  });
+
+  end_agent_trial_sig.AddAction([this](agent_t & agent) {
+
+  });
+
+  do_agent_trial_sig.AddAction([this](agent_t & agent) {
+
+  });
+
+  do_agent_advance_sig.AddAction([this](agent_t & agent) {
+    eval_hw->SingleProcess();
+  });
+
+  after_agent_action_sig.AddAction([this](agent_t & agent) {
+
+  });
+
+  // Setup the timing for changing signal-response mappings. 
   switch (SIGNAL_RESPONSE_MAPPING_CHANGE_METHOD) {
     case SIGNAL_RESPONSE_MAPPING_CHANGE_METHOD_ID__RAND: {
       reset_signal_mapping_change_trial_sig.AddAction([this]() {
@@ -809,7 +844,21 @@ void Experiment::DoConfig__Experiment() {
     }
   }
 
-  
+  // Configure selection
+  switch(SELECTION_METHOD) {
+    case SELECTION_METHOD_ID__TOURNAMENT: {
+      do_selection_sig.AddAction([this]() {
+        emp::EliteSelect(*world, ELITE_SELECT__ELITE_CNT, 1);
+        emp::TournamentSelect(*world, TOURNAMENT_SIZE, POP_SIZE - ELITE_SELECT__ELITE_CNT);
+      });
+      break;
+    }
+    default: {
+      std::cout << "Unrecognized selection method (" << SELECTION_METHOD << "). Exiting..." << std::endl;
+      exit(-1);
+    }
+  }
+
 }
 
 void Experiment::DoConfig__Analysis() {
