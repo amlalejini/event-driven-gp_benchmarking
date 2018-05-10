@@ -61,7 +61,11 @@ namespace toolbelt {
   //  [ ] track how many of each type of mutation occurs
   template <typename HARDWARE>
   class SignalGPMutator {
-    using program_t = typename HARDWARE::program_t;
+    using hardware_t = HARDWARE;
+    using program_t = typename hardware_t::program_t;
+    using tag_t = typename hardware_t::affinity_t;
+    using inst_t = typename hardware_t::inst_t;
+    using function_t = typename hardware_t::Function;
 
     protected:
       size_t PROG_MIN_FUNC_CNT;
@@ -81,19 +85,19 @@ namespace toolbelt {
       double PER_FUNC__FUNC_DEL_RATE;
 
     public:
-      SignalGPMutator(_PROG_MIN_FUNC_CNT=1,
-                      _PROG_MAX_FUNC_CNT=8,
-                      _PROG_MIN_FUNC_LEN=1,
-                      _PROG_MAX_FUNC_LEN=8,
-                      _PROG_MAX_TOTAL_LEN=64,
-                      _PROG_MAX_ARG_VAL=16,
-                      _PER_BIT__TAG_BFLIP_RATE=0.005,
-                      _PER_INST__SUB_RATE=0.005,
-                      _PER_INST__INS_RATE=0.005,
-                      _PER_INST__DEL_RATE=0.005,
-                      _PER_FUNC__SLIP_RATE=0.05,
-                      _PER_FUNC__FUNC_DUP_RATE=0.05,
-                      _PER_FUNC__FUNC_DEL_RATE=0.05)
+      SignalGPMutator(size_t _PROG_MIN_FUNC_CNT=1,
+                      size_t _PROG_MAX_FUNC_CNT=8,
+                      size_t _PROG_MIN_FUNC_LEN=1,
+                      size_t _PROG_MAX_FUNC_LEN=8,
+                      size_t _PROG_MAX_TOTAL_LEN=64,
+                      int _PROG_MAX_ARG_VAL=16,
+                      double _PER_BIT__TAG_BFLIP_RATE=0.005,
+                      double _PER_INST__SUB_RATE=0.005,
+                      double _PER_INST__INS_RATE=0.005,
+                      double _PER_INST__DEL_RATE=0.005,
+                      double _PER_FUNC__SLIP_RATE=0.05,
+                      double _PER_FUNC__FUNC_DUP_RATE=0.05,
+                      double _PER_FUNC__FUNC_DEL_RATE=0.05)
         : PROG_MIN_FUNC_CNT(_PROG_MIN_FUNC_CNT),
           PROG_MAX_FUNC_CNT(_PROG_MAX_FUNC_CNT),
           PROG_MIN_FUNC_LEN(_PROG_MIN_FUNC_LEN),
@@ -196,7 +200,7 @@ namespace toolbelt {
             {
               // duplicate begin:end
               const size_t new_size = program[fID].GetSize() + (size_t)dup_size;
-              hardware_t::Function new_fun(program[fID].GetAffinity());
+              function_t new_fun(program[fID].GetAffinity());
               for (size_t i = 0; i < new_size; ++i)
               {
                 if (i < end)
@@ -211,7 +215,7 @@ namespace toolbelt {
             else if (del && ((program[fID].GetSize() - del_size) >= PROG_MIN_FUNC_LEN))
             {
               // delete end:begin
-              hardware_t::Function new_fun(program[fID].GetAffinity());
+              function_t new_fun(program[fID].GetAffinity());
               for (size_t i = 0; i < end; ++i)
                 new_fun.PushInst(program[fID][i]);
               for (size_t i = begin; i < program[fID].GetSize(); ++i)
@@ -258,7 +262,7 @@ namespace toolbelt {
           // - Compute number of insertions.
           int num_ins = rnd.GetRandBinomial(program[fID].GetSize(), PER_INST__INS_RATE);
           // Ensure that insertions don't exceed maximum program length.
-          if ((num_ins + program[fID].GetSize()) > SGP_PROG_MAX_FUNC_LEN)
+          if ((num_ins + program[fID].GetSize()) > PROG_MAX_FUNC_LEN)
           {
             num_ins = PROG_MAX_FUNC_LEN - program[fID].GetSize();
           }
@@ -276,7 +280,7 @@ namespace toolbelt {
             emp::vector<size_t> ins_locs = emp::RandomUIntVector(rnd, num_ins, 0, program[fID].GetSize());
             if (ins_locs.size())
               std::sort(ins_locs.begin(), ins_locs.end(), std::greater<size_t>());
-            hardware_t::Function new_fun(program[fID].GetAffinity());
+            function_t new_fun(program[fID].GetAffinity());
             size_t rhead = 0;
             while (rhead < program[fID].GetSize())
             {
@@ -297,7 +301,7 @@ namespace toolbelt {
                 }
               }
               // Do we delete this instruction?
-              if (rnd.P(SGP__PER_INST__DEL_RATE) && (expected_func_len > PROG_MIN_FUNC_LEN))
+              if (rnd.P(PER_INST__DEL_RATE) && (expected_func_len > PROG_MIN_FUNC_LEN))
               {
                 ++mut_cnt;
                 --expected_prog_len;
