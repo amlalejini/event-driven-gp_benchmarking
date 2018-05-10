@@ -1361,7 +1361,6 @@ void Experiment::DoConfig__Experiment() {
     }
 
     std::cout << "Update: " << update << " Max score: " << best_score << std::endl;
-    // TODO: snapshot here!
     if (update % POP_SNAPSHOT_INTERVAL == 0) do_pop_snapshot_sig.Trigger(update);
 
   });
