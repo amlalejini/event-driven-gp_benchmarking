@@ -28,6 +28,6 @@ int main(int argc, char* argv[])
   std::cout << "==============================\n"
             << std::endl;
 
-  // Experiment e(config);
+  Experiment e(config);
   // e.Run();
 }
