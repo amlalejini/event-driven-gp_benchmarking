@@ -15,7 +15,7 @@ I'll try to update things or make notes when that happens, but no promises.
 Once an adventure makes it out of the exploratory stage and it becomes its own application/experiment for a publication, it'll likely get moved to it's own repository where I will document experiment/publication-specific details. Again, I'll try to make note when this happens. 
 
 # Adventures
-For each documented adventure, see the NOTES.md file in the adventure's directory for more specific details. 
+For each documented adventure, see the README.md file in the adventure's directory for more specific details. 
 
 ## Tests
 These adventures are generally used to test a single aspect of SignalGP (typically a new feature while I'm developing it). 
