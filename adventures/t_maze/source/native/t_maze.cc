@@ -16,7 +16,7 @@ int main(int argc, char* argv[])
   TMazeConfig config;
   config.Read(config_fname);
 
-  if (args.ProcessConfigOptions(config, std::cout, config_fname, "../dol-config.h") == false)
+  if (args.ProcessConfigOptions(config, std::cout, config_fname, "../t_maze-config.h") == false)
     exit(0);
   if (args.TestUnknown() == false)
     exit(0);
