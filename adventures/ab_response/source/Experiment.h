@@ -36,7 +36,18 @@ constexpr size_t RUN_ID__ANALYSIS = 1;
 constexpr size_t SIGNAL_TAG_GEN_METHOD_ID__RAND = 0;
 constexpr size_t SIGNAL_TAG_GEN_METHOD_ID__LOAD = 1;
 
+constexpr size_t REF_MOD_ADJUSTMENT_TYPE_ID__ADD = 0;
+constexpr size_t REF_MOD_ADJUSTMENT_TYPE_ID__MULT = 1;
+
+constexpr size_t SIMILARITY_ADJUSTMENT_METHOD_ID__ADD = 0;
+constexpr size_t SIMILARITY_ADJUSTMENT_METHOD_ID__MULT = 1;
+
+constexpr size_t SIGNAL_RESPONSE_MAPPING_CHANGE_METHOD_ID__RAND = 0;
+constexpr size_t SIGNAL_RESPONSE_MAPPING_CHANGE_METHOD_ID__HALF = 1;
+
 constexpr size_t TAG_WIDTH = 16;
+
+constexpr double MIN_POSSIBLE_SCORE = -32767;
 
 /// Class to manage AB response experiment.
 class Experiment {
@@ -149,10 +160,14 @@ protected:
   std::string ANCESTOR_FPATH;
   // -- EVALUATION_GROUP --
   size_t EVALUATION_CNT;
+  size_t TRIAL_CNT;
   size_t SIGNAL_CNT;
   size_t RESPONSE_CNT;
   size_t SIGNAL_TAG_GENERATION_METHOD;
   std::string SIGNAL_TAG_FPATH;
+  size_t SIGNAL_RESPONSE_MAPPING_CHANGE_METHOD;
+  size_t SIGNAL_RESPONSE_MAPPING_CHANGE_MIN_TRIAL;
+  size_t SIGNAL_RESPONSE_MAPPING_CHANGE_MAX_TRIAL;
   // -- SELECTION_GROUP --
   size_t TOURNAMENT_SIZE;
   size_t SELECTION_METHOD;
@@ -236,6 +251,7 @@ protected:
 
   emp::Signal<void(agent_t &)> do_agent_advance_sig;
   emp::Signal<void(agent_t &)> after_agent_action_sig;
+  emp::Signal<void(void)> reset_signal_mapping_change_trial_sig;
 
   void Evaluate(agent_t & agent) {
     // TODO: write evaluate function
@@ -264,10 +280,14 @@ public:
     ANCESTOR_FPATH = config.ANCESTOR_FPATH();
     // -- Evaluation Group --
     EVALUATION_CNT = config.EVALUATION_CNT();
+    TRIAL_CNT = config.TRIAL_CNT();
     SIGNAL_CNT = config.SIGNAL_CNT();
     RESPONSE_CNT = config.RESPONSE_CNT();
     SIGNAL_TAG_GENERATION_METHOD = config.SIGNAL_TAG_GENERATION_METHOD();
     SIGNAL_TAG_FPATH = config.SIGNAL_TAG_FPATH();
+    SIGNAL_RESPONSE_MAPPING_CHANGE_METHOD = config.SIGNAL_RESPONSE_MAPPING_CHANGE_METHOD();
+    SIGNAL_RESPONSE_MAPPING_CHANGE_MIN_TRIAL = config.SIGNAL_RESPONSE_MAPPING_CHANGE_MIN_TRIAL();
+    SIGNAL_RESPONSE_MAPPING_CHANGE_MAX_TRIAL = config.SIGNAL_RESPONSE_MAPPING_CHANGE_MAX_TRIAL();
     // -- Selection Group --
     TOURNAMENT_SIZE = config.TOURNAMENT_SIZE();
     SELECTION_METHOD = config.SELECTION_METHOD();
@@ -477,6 +497,22 @@ void Experiment::RunStep() {
 }
 
 // ================== Misc. utility function implementations ==================
+void Experiment::InitPopulation__FromAncestorFile() {
+  std::cout << "Initializing population from ancestor file (" << ANCESTOR_FPATH << ")!" << std::endl;
+  // Configure the ancestor program.
+  program_t ancestor_prog(inst_lib);
+  std::ifstream ancestor_fstream(ANCESTOR_FPATH);
+  if (!ancestor_fstream.is_open()) {
+    std::cout << "Failed to open ancestor program file(" << ANCESTOR_FPATH << "). Exiting..." << std::endl;
+    exit(-1);
+  }
+  ancestor_prog.Load(ancestor_fstream);
+  std::cout << " --- Ancestor program: ---" << std::endl;
+  ancestor_prog.PrintProgramFull();
+  std::cout << " -------------------------" << std::endl;
+  world->Inject(ancestor_prog, POP_SIZE);    // Inject population!
+}
+
 void Experiment::GenerateSignalTags__FromTagFile() {
   signal_tags.resize(SIGNAL_CNT, tag_t());
   feedback_tags.resize(SIGNAL_CNT, tag_t());
@@ -532,13 +568,254 @@ void Experiment::SaveSignalTags() {
   signaltags_ofstream.close();
 }
 
+// ================== Systematics functions ==================
+// TODO: move this over to utilities belt!
+void Experiment::Snapshot__Programs(size_t u) {
+  std::string snapshot_dir = DATA_DIRECTORY + "pop_" + emp::to_string((int)u);
+  mkdir(snapshot_dir.c_str(), ACCESSPERMS);
+  // For each program in the population, dump the full program description in a single file.
+  std::ofstream prog_ofstream(snapshot_dir + "/pop_" + emp::to_string((int)u) + ".pop");
+  for (size_t i = 0; i < world->GetSize(); ++i) {
+    if (!world->IsOccupied(i)) continue;
+    prog_ofstream << "==="<<i<<":"<<world->CalcFitnessID(i)<<"===\n";
+    Agent & agent = world->GetOrg(i);
+    agent.program.PrintProgramFull(prog_ofstream);
+  }
+  prog_ofstream.close();
+}
+
 // ================== Evolution function implementations ==================
-size_t Experiment::Mutate(agent_t & agent) {
+size_t Experiment::Mutate(agent_t & agent, emp::Random & rnd) {
   program_t & program = agent.GetGenome();
-  return mutator.ApplyMutations(program, *random);
+  return mutator.ApplyMutations(program, rnd);
+}
+
+double Experiment::CalcFitness(agent_t & agent) {
+  // TODO: implement fitness function
+  return 0.0;
 }
 
 // ================== Configuration implementations ==================
+void Experiment::DoConfig__Hardware() {
+  // Setup the instruction set
+  // - Standard instructions
+  inst_lib->AddInst("Inc", hardware_t::Inst_Inc, 1, "Increment value in local memory Arg1");
+  inst_lib->AddInst("Dec", hardware_t::Inst_Dec, 1, "Decrement value in local memory Arg1");
+  inst_lib->AddInst("Not", hardware_t::Inst_Not, 1, "Logically toggle value in local memory Arg1");
+  inst_lib->AddInst("Add", hardware_t::Inst_Add, 3, "Local memory: Arg3 = Arg1 + Arg2");
+  inst_lib->AddInst("Sub", hardware_t::Inst_Sub, 3, "Local memory: Arg3 = Arg1 - Arg2");
+  inst_lib->AddInst("Mult", hardware_t::Inst_Mult, 3, "Local memory: Arg3 = Arg1 * Arg2");
+  inst_lib->AddInst("Div", hardware_t::Inst_Div, 3, "Local memory: Arg3 = Arg1 / Arg2");
+  inst_lib->AddInst("Mod", hardware_t::Inst_Mod, 3, "Local memory: Arg3 = Arg1 % Arg2");
+  inst_lib->AddInst("TestEqu", hardware_t::Inst_TestEqu, 3, "Local memory: Arg3 = (Arg1 == Arg2)");
+  inst_lib->AddInst("TestNEqu", hardware_t::Inst_TestNEqu, 3, "Local memory: Arg3 = (Arg1 != Arg2)");
+  inst_lib->AddInst("TestLess", hardware_t::Inst_TestLess, 3, "Local memory: Arg3 = (Arg1 < Arg2)");
+  inst_lib->AddInst("If", hardware_t::Inst_If, 1, "Local memory: If Arg1 != 0, proceed; else, skip block.", emp::ScopeType::BASIC, 0, {"block_def"});
+  inst_lib->AddInst("While", hardware_t::Inst_While, 1, "Local memory: If Arg1 != 0, loop; else, skip block.", emp::ScopeType::BASIC, 0, {"block_def"});
+  inst_lib->AddInst("Countdown", hardware_t::Inst_Countdown, 1, "Local memory: Countdown Arg1 to zero.", emp::ScopeType::BASIC, 0, {"block_def"});
+  inst_lib->AddInst("Close", hardware_t::Inst_Close, 0, "Close current block if there is a block to close.", emp::ScopeType::BASIC, 0, {"block_close"});
+  inst_lib->AddInst("Break", hardware_t::Inst_Break, 0, "Break out of current block.");
+  inst_lib->AddInst("Return", hardware_t::Inst_Return, 0, "Return from current function if possible.");
+  inst_lib->AddInst("SetMem", hardware_t::Inst_SetMem, 2, "Local memory: Arg1 = numerical value of Arg2");
+  inst_lib->AddInst("CopyMem", hardware_t::Inst_CopyMem, 2, "Local memory: Arg1 = Arg2");
+  inst_lib->AddInst("SwapMem", hardware_t::Inst_SwapMem, 2, "Local memory: Swap values of Arg1 and Arg2.");
+  inst_lib->AddInst("Input", hardware_t::Inst_Input, 2, "Input memory Arg1 => Local memory Arg2.");
+  inst_lib->AddInst("Output", hardware_t::Inst_Output, 2, "Local memory Arg1 => Output memory Arg2.");
+  inst_lib->AddInst("Commit", hardware_t::Inst_Commit, 2, "Local memory Arg1 => Shared memory Arg2.");
+  inst_lib->AddInst("Pull", hardware_t::Inst_Pull, 2, "Shared memory Arg1 => Shared memory Arg2.");
+  inst_lib->AddInst("Nop", hardware_t::Inst_Nop, 0, "No operation.");
 
+  inst_lib->AddInst("Call", Inst_Call, 0, "Call function that best matches call affinity.", emp::ScopeType::BASIC, 0, {"affinity"});
+  inst_lib->AddInst("Fork", Inst_Fork, 0, "Fork a new thread. Local memory contents of callee are loaded into forked thread's input memory.", emp::ScopeType::BASIC, 0, {"affinity"});
+  inst_lib->AddInst("Terminate", Inst_Terminate, 0, "Kill current thread.");
+
+  // TODO: any experiment-specific instructions
+
+  // Regulatory instructions
+  switch(REF_MOD_ADJUSTMENT_TYPE) {
+    case REF_MOD_ADJUSTMENT_TYPE_ID__ADD: {
+      // When applying regulation to a function's reference modifier, do so by adding/subtracting ref mod adjustment value.
+
+      inst_lib->AddInst("Promote", [this](hardware_t & hw, const inst_t & inst) {
+        emp::vector<size_t> targets(hw.FindBestFuncMatch(inst.affinity, 0.0, MODIFY_REG));
+        size_t targetID;
+        if (targets.empty()) return; 
+        if (targets.size() == 1) targetID = targets[0];
+        else targetID = targets[random->GetUInt(targets.size())];
+        program_t & program = hw.GetProgram();
+        double cur_mod = program[targetID].GetRefModifier();
+        program[targetID].SetRefModifier(cur_mod + REF_MOD_ADJUSTMENT_VALUE);
+      }, 0, "Up regulate target function. Use tag to determine function target.", emp::ScopeType::BASIC, 0, {"affinity"});
+
+      inst_lib->AddInst("Repress", [this](hardware_t & hw, const inst_t & inst) {
+        emp::vector<size_t> targets(hw.FindBestFuncMatch(inst.affinity, 0.0, MODIFY_REG));
+        size_t targetID;
+        if (targets.empty()) return; 
+        if (targets.size() == 1) targetID = targets[0];
+        else targetID = targets[random->GetUInt(targets.size())];
+        program_t & program = hw.GetProgram();
+        double cur_mod = program[targetID].GetRefModifier();
+        program[targetID].SetRefModifier(cur_mod - REF_MOD_ADJUSTMENT_VALUE);
+      }, 0, "Down regulate target function. Use tag to determine function target.", emp::ScopeType::BASIC, 0, {"affinity"});
+
+      break;
+    }
+    case REF_MOD_ADJUSTMENT_TYPE_ID__MULT: {
+
+      emp_assert(REF_MOD_ADJUSTMENT_VALUE != 0);
+
+      inst_lib->AddInst("Promote", [this](hardware_t & hw, const inst_t & inst) {
+        emp::vector<size_t> targets(hw.FindBestFuncMatch(inst.affinity, 0.0, MODIFY_REG));
+        size_t targetID;
+        if (targets.empty()) return; 
+        if (targets.size() == 1) targetID = targets[0];
+        else targetID = targets[random->GetUInt(targets.size())];
+        program_t & program = hw.GetProgram();
+        double cur_mod = program[targetID].GetRefModifier();
+        program[targetID].SetRefModifier(cur_mod * REF_MOD_ADJUSTMENT_VALUE);
+      }, 0, "Up regulate target function. Use tag to determine function target.", emp::ScopeType::BASIC, 0, {"affinity"});
+
+      inst_lib->AddInst("Repress", [this](hardware_t & hw, const inst_t & inst) {
+        emp::vector<size_t> targets(hw.FindBestFuncMatch(inst.affinity, 0.0, MODIFY_REG));
+        size_t targetID;
+        if (targets.empty()) return; 
+        if (targets.size() == 1) targetID = targets[0];
+        else targetID = targets[random->GetUInt(targets.size())];
+        program_t & program = hw.GetProgram();
+        double cur_mod = program[targetID].GetRefModifier();
+        program[targetID].SetRefModifier(cur_mod * (1/REF_MOD_ADJUSTMENT_VALUE));
+      }, 0, "Down regulate target function. Use tag to determine function target.", emp::ScopeType::BASIC, 0, {"affinity"});
+      
+      break;
+    }
+    default: {
+      std::cout << "Unrecognized REF_MOD_ADJUSTMENT_TYPE (" << REF_MOD_ADJUSTMENT_TYPE << "). Exiting..." << std::endl;
+      exit(-1);
+    }
+  }
+
+  // Similarity adjustment method defines the way we apply the function reference 
+  // modifier when a tag similarity against a function is being calculated.
+  switch (SIMILARITY_ADJUSTMENT_METHOD) {
+    case SIMILARITY_ADJUSTMENT_METHOD_ID__ADD: {
+      // When adjusting similarity calculation, do so by adding function reference modifier.
+      eval_hw->SetBaseFuncRefMod(0.0);
+      eval_hw->SetFuncRefModifier([](double base_sim, const function_t & function) {
+        return base_sim + function.GetRefModifier();
+      });
+      break;
+    }
+    case SIMILARITY_ADJUSTMENT_METHOD_ID__MULT: {
+      // When adjusting similarity calculation, do so by multiplying function reference modifier.
+      eval_hw->SetBaseFuncRefMod(1.0);
+      eval_hw->SetFuncRefModifier([](double base_sim, const function_t & function) {
+        return base_sim * function.GetRefModifier();
+      });
+      break;
+    }
+    default: {
+      std::cout << "Unrecognized SIMILARITY_ADJUSTMENT_METHOD (" << SIMILARITY_ADJUSTMENT_METHOD << "). Exiting..." << std::endl;
+      exit(-1);
+    }
+  }
+
+  // Setup the event library
+  // TODO: setup events
+
+  // Configure hardware settings
+  eval_hw->SetMinBindThresh(SGP_HW_MIN_BIND_THRESH);
+  eval_hw->SetMaxCores(SGP_HW_MAX_CORES);
+  eval_hw->SetMaxCallDepth(SGP_HW_MAX_CALL_DEPTH);
+
+}
+
+void Experiment::DoConfig__Experiment() {
+  // Make a data directory.
+  mkdir(DATA_DIRECTORY.c_str(), ACCESSPERMS);
+  if (DATA_DIRECTORY.back() != '/') DATA_DIRECTORY += '/';
+
+  // Configure the world.
+  world->Reset();
+  world->SetWellMixed(true);
+  world->SetFitFun([this](agent_t & agent) { return this->CalcFitness(agent); });
+  world->SetMutFun([this](agent_t & agent, emp::Random & rnd) { return this->Mutate(agent, rnd); });
+
+  // Configure run/eval signals.
+  do_pop_init_sig.AddAction([this]() { this->InitPopulation__FromAncestorFile(); });
+  do_pop_snapshot_sig.AddAction([this](size_t u) { this->Snapshot__Programs(u); });
+
+  do_begin_run_setup_sig.AddAction([this]() {
+    // Do one-time run setup. (things that need to happen once, right before the run)
+    std::cout << "Doing initial run setup!" << std::endl;
+    // Setup systematics/fitness tracking!
+    auto & sys_file = world->SetupSystematicsFile(DATA_DIRECTORY + "systematics.csv");
+    sys_file.SetTimingRepeat(SYSTEMATICS_INTERVAL);
+    auto & fit_file = world->SetupFitnessFile(DATA_DIRECTORY + "fitness.csv");
+    fit_file.SetTimingRepeat(SYSTEMATICS_INTERVAL);
+    // TODO: add dominant file back in!
+    // auto & dom_file = this->AddDominantFile(DATA_DIRECTORY + "dominant.csv");
+    // dom_file.SetTimingRepeat(SYSTEMATICS_INTERVAL);
+    // dom_file.SetTimingRepeat(SYSTEMATICS_INTERVAL);
+    // Initialize the population. 
+    do_pop_init_sig.Trigger();
+  });
+
+  do_evaluation_sig.AddAction([this]() {
+    // Do whole-population (single-generation) evaluation.
+    double best_score = MIN_POSSIBLE_SCORE;
+    dom_agent_id = 0;
+    
+    // Set switch times for this generation.
+    reset_signal_mapping_change_trial_sig.Trigger();
+
+    for (size_t id = 0; id < world->GetSize(); ++id) {
+      // Load and configure agent.
+      agent_t & our_hero = world->GetOrg(id);
+      our_hero.SetID(id);
+      // Take care of one-time stuff for this evaluation.
+      eval_hw->SetProgram(our_hero.GetGenome());
+      // Evaluate!
+      this->Evaluate(our_hero);
+      // TODO: configure representative phenotype!
+      double score = CalcFitness(our_hero);
+      if (score > best_score) { best_score = score; dom_agent_id = id; }
+    }
+
+    std::cout << "Update: " << update << " Max score: " << best_score << std::endl;
+    if (update % POP_SNAPSHOT_INTERVAL == 0) do_pop_snapshot_sig.Trigger(update);
+
+  });
+
+  
+  switch (SIGNAL_RESPONSE_MAPPING_CHANGE_METHOD) {
+    case SIGNAL_RESPONSE_MAPPING_CHANGE_METHOD_ID__RAND: {
+      reset_signal_mapping_change_trial_sig.AddAction([this]() {
+        for (size_t i = 0; i < EVALUATION_CNT; ++i) {
+          switch_trial_by_eval[i] = random->GetUInt(SIGNAL_RESPONSE_MAPPING_CHANGE_MIN_TRIAL, SIGNAL_RESPONSE_MAPPING_CHANGE_MAX_TRIAL);
+        }
+      });    
+      break;
+    }
+    case SIGNAL_RESPONSE_MAPPING_CHANGE_METHOD_ID__HALF: {
+      // Set mapping change times and never reset during a run.
+      for (size_t i = 0; i < EVALUATION_CNT; ++i) {
+        switch_trial_by_eval[i] = (size_t)(TRIAL_CNT/2);
+      }
+      break;
+    }
+    default: {
+      std::cout << "Unrecognized SIGNAL_RESPONSE_MAPPING_CHANGE_METHOD (" << SIGNAL_RESPONSE_MAPPING_CHANGE_METHOD << "). Exiting..." << std::endl;
+      exit(-1);
+    }
+  }
+
+  
+}
+
+void Experiment::DoConfig__Analysis() {
+  // TODO: implement analysis mode...
+  std::cout << "Analysis mode hasn't been implemented yet! Exiting..." << std::endl;
+  exit(-1);
+}
 
 #endif
