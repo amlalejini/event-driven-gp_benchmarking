@@ -41,6 +41,12 @@ constexpr size_t RUN_ID__ANALYSIS = 2;
 constexpr size_t ENV_TAG_GEN_ID__RANDOM = 0;
 constexpr size_t ENV_TAG_GEN_ID__LOAD = 1;
 
+constexpr size_t POP_INIT_METHOD_ID__ANCESTOR = 0;
+constexpr size_t POP_INIT_METHOD_ID__RANDOM = 1;
+
+constexpr size_t ENV_CHG_METHOD_ID__RANDOM = 0;
+constexpr size_t ENV_CHG_METHOD_ID__REGULAR = 1;
+
 constexpr size_t TRAIT_ID__STATE = 0;
 
 class Experiment {
@@ -201,6 +207,8 @@ public:
       completed_by_task[task_id] = val; 
     }
 
+    void IncEnvMatchScore(double val=1.0) { env_match_score += val; }
+
   };
 
   /// Utility class used to cache phenotypes during population evaluation.
@@ -270,6 +278,7 @@ protected:
   size_t EVAL_TIME; 
   size_t TRIAL_CNT; 
   bool TASKS_ON; 
+  bool EVOLVE_SIMILARITY_THRESH;
   // == ENVIRONMENT_GROUP ==
   size_t ENVIRONMENT_STATES; 
   size_t ENVIRONMENT_TAG_GENERATION_METHOD; 
@@ -277,7 +286,8 @@ protected:
   size_t ENVIRONMENT_CHANGE_METHOD; 
   double ENVIRONMENT_CHANGE_PROB; 
   size_t ENVIRONMENT_CHANGE_INTERVAL; 
-  size_t ENVIRONMENT_DISTRACTION_SIGNALS; 
+  bool ENVIRONMENT_DISTRACTION_SIGNALS; 
+  size_t ENVIRONMENT_DISTRACTION_SIGNAL_CNT;
   double ENVIRONMENT_DISTRACTION_SIGNAL_PROB;
   // == SELECTION_GROUP ==
   size_t TOURNAMENT_SIZE; 
@@ -368,6 +378,8 @@ protected:
   emp::Signal<void(agent_t &)> end_agent_trial_sig; ///< Triggered at the beginning of an agent trial.
 
   emp::Signal<void(agent_t &)> do_agent_advance_sig; ///< When triggered, advance SignalGP evaluation hardware
+  emp::Signal<void(void)> do_env_advance_sig;
+
 
   // A few flexible functors!
   std::function<double(agent_t &)> calc_score;
@@ -375,6 +387,8 @@ protected:
   // For MAP-Elites
   std::function<double(agent_t &)> inst_ent_fun;
   std::function<int(agent_t &)> func_cnt_fun;
+
+  std::function<size_t(agent_t &, emp::Random &)> mutate_agent;
 
   /// Reset logic tasks, guaranteeing no solution collisions among the tasks.
   void ResetTasks() {
@@ -429,6 +443,7 @@ public:
     EVAL_TIME = config.EVAL_TIME(); 
     TRIAL_CNT = config.TRIAL_CNT(); 
     TASKS_ON = config.TASKS_ON(); 
+    EVOLVE_SIMILARITY_THRESH = config.EVOLVE_SIMILARITY_THRESH();
     // == ENVIRONMENT_GROUP ==
     ENVIRONMENT_STATES = config.ENVIRONMENT_STATES(); 
     ENVIRONMENT_TAG_GENERATION_METHOD = config.ENVIRONMENT_TAG_GENERATION_METHOD(); 
@@ -437,6 +452,7 @@ public:
     ENVIRONMENT_CHANGE_PROB = config.ENVIRONMENT_CHANGE_PROB(); 
     ENVIRONMENT_CHANGE_INTERVAL = config.ENVIRONMENT_CHANGE_INTERVAL(); 
     ENVIRONMENT_DISTRACTION_SIGNALS = config.ENVIRONMENT_DISTRACTION_SIGNALS(); 
+    ENVIRONMENT_DISTRACTION_SIGNAL_CNT = config.ENVIRONMENT_DISTRACTION_SIGNAL_CNT();
     ENVIRONMENT_DISTRACTION_SIGNAL_PROB = config.ENVIRONMENT_DISTRACTION_SIGNAL_PROB();
     // == SELECTION_GROUP ==
     TOURNAMENT_SIZE = config.TOURNAMENT_SIZE(); 
@@ -496,7 +512,7 @@ public:
     switch(ENVIRONMENT_TAG_GENERATION_METHOD) {
       case ENV_TAG_GEN_ID__RANDOM: {
         env_state_tags = toolbelt::GenerateRandomTags<TAG_WIDTH>(*random, ENVIRONMENT_STATES, true);
-        if (ENVIRONMENT_DISTRACTION_SIGNALS) distraction_sig_tags = toolbelt::GenerateRandomTags<TAG_WIDTH>(*random, ENVIRONMENT_DISTRACTION_SIGNALS, env_state_tags, true);
+        if (ENVIRONMENT_DISTRACTION_SIGNALS) distraction_sig_tags = toolbelt::GenerateRandomTags<TAG_WIDTH>(*random, ENVIRONMENT_DISTRACTION_SIGNAL_CNT, env_state_tags, true);
         SaveEnvTags();
         break;
       }
@@ -583,9 +599,12 @@ public:
   void GenerateEnvTags__FromTagFile();
 
   void InitPopulation__FromAncestorFile();
+  void InitPopulation__Random();
+
 
   // === Systematics Functions ===
   void Snapshot__Programs(size_t u); 
+  void Snapshot__Stats(size_t u);
 
   // === Extra SignalGP instruction definitions ===
   // -- Execution control instructions --
@@ -596,6 +615,12 @@ public:
   void Inst_Load1(hardware_t & hw, const inst_t & inst);
   void Inst_Load2(hardware_t & hw, const inst_t & inst);
   void Inst_Submit(hardware_t & hw, const inst_t & inst);
+
+  // === SignalGP event definitions ===
+  static void HandleEvent__EnvSignal_ED(hardware_t & hw, const event_t & event);
+  static void HandleEvent__EnvSignal_IMP(hardware_t & hw, const event_t & event);
+  static void DispatchEvent__EnvSignal_ED(hardware_t & hw, const event_t & event);
+  static void DispatchEvent__EnvSignal_IMP(hardware_t & hw, const event_t & event);
 
 };
 
@@ -639,6 +664,14 @@ void Experiment::Inst_Submit(hardware_t & hw, const inst_t & inst) {
   task_set.Submit((task_io_t)state.GetLocal(inst.args[0]), trial_time, credit);
 }
 
+// === SignalGP events ===
+// Events.
+void Experiment::HandleEvent__EnvSignal_ED(hardware_t & hw, const event_t & event) { hw.SpawnCore(event.affinity, hw.GetMinBindThresh(), event.msg); }
+void Experiment::HandleEvent__EnvSignal_IMP(hardware_t & hw, const event_t & event) { return; }
+void Experiment::DispatchEvent__EnvSignal_ED(hardware_t & hw, const event_t & event) { hw.QueueEvent(event); }
+void Experiment::DispatchEvent__EnvSignal_IMP(hardware_t & hw, const event_t & event) { return; }
+
+
 // === Run functions ===
 void Experiment::Run() {
   switch(RUN_MODE) {
@@ -668,37 +701,487 @@ void Experiment::RunStep() {
 }
 
 // == utility functions ==
+
+/// Utility function to save environment tags.
 void Experiment::SaveEnvTags() {
-
+  // Save out environment states.
+  std::ofstream envtags_ofstream(ENVIRONMENT_TAG_FPATH);
+  envtags_ofstream << "tag_id,env_tag,tag\n";
+  for (size_t i = 0; i < env_state_tags.size(); ++i) {
+    envtags_ofstream << i << ",1,"; env_state_tags[i].Print(envtags_ofstream); envtags_ofstream << "\n";
+  }
+  for (size_t i = 0; i < distraction_sig_tags.size(); ++i) {
+    envtags_ofstream << i << ",0,"; distraction_sig_tags[i].Print(envtags_ofstream); envtags_ofstream << "\n";
+  }
+  envtags_ofstream.close();
 }
+
 void Experiment::GenerateEnvTags__FromTagFile() {
+  env_state_tags.resize(ENVIRONMENT_STATES, tag_t());
+  distraction_sig_tags.resize(ENVIRONMENT_DISTRACTION_SIGNAL_CNT, tag_t());
 
+  std::ifstream tag_fstream(ENVIRONMENT_TAG_FPATH);
+  if (!tag_fstream.is_open()) {
+    std::cout << "Failed to open " << ENVIRONMENT_TAG_FPATH << ". Exiting..." << std::endl;
+    exit(-1);
+  }
+
+  std::string cur_line;
+  emp::vector<std::string> line_components;
+
+  const size_t tag_id_pos = 0;
+  const size_t true_tag_pos = 1;
+  const size_t tag_pos = 2;
+
+  std::getline(tag_fstream, cur_line); // Consume header.
+
+  while (!tag_fstream.eof()) {
+    std::getline(tag_fstream, cur_line);
+    emp::remove_whitespace(cur_line);
+    
+    if (cur_line == emp::empty_string()) continue;
+    emp::slice(cur_line, line_components, ',');
+
+    int tag_id = std::stoi(line_components[tag_id_pos]);
+    int true_tag = std::stoi(line_components[true_tag_pos]);
+
+    if (true_tag == 1) {
+      // Load environment state tag!
+      if (tag_id > env_state_tags.size()) {
+        std::cout << "WARNING: tag ID exceeds environment states!" << std::endl;
+        continue;
+      }
+      for (size_t i = 0; i < line_components[tag_pos].size(); ++i) {
+        if (i >= TAG_WIDTH) break;
+        if (line_components[tag_pos][i] == '1') env_state_tags[tag_id].Set(env_state_tags[tag_id].GetSize() - i - 1, true);
+      }
+    } else {
+      // Load distraction signal tag!
+      if (tag_id > distraction_sig_tags.size()) {
+        std::cout << "WARNING: tag ID exceeds distraction signals!" << std::endl;
+        continue;
+      }
+      for (size_t i = 0; i < line_components[tag_pos].size(); ++i) {
+        if (i >= TAG_WIDTH) break;
+        if (line_components[tag_pos][i] == '1') distraction_sig_tags[tag_id].Set(distraction_sig_tags[tag_id].GetSize() - i - 1, true);
+      }
+    }
+  }
+  tag_fstream.close();
 }
+
 void Experiment::InitPopulation__FromAncestorFile() {
+  std::cout << "Initializing population from ancestor file (" << ANCESTOR_FPATH << ")!" << std::endl;
+  // Configure the ancestor program.
+  program_t ancestor_prog(inst_lib);
+  std::ifstream ancestor_fstream(ANCESTOR_FPATH);
+  if (!ancestor_fstream.is_open()) {
+    std::cout << "Failed to open ancestor program file(" << ANCESTOR_FPATH << "). Exiting..." << std::endl;
+    exit(-1);
+  }
+  ancestor_prog.Load(ancestor_fstream);
+  std::cout << " --- Ancestor program: ---" << std::endl;
+  ancestor_prog.PrintProgramFull();
+  std::cout << " -------------------------" << std::endl;
+  world->Inject(ancestor_prog, POP_SIZE);    // Inject population!
+  // TODO: test that things aren't being mutated!
+}
+
+void Experiment::InitPopulation__Random() {
 
 }
 
 // == Systematics functions ==
 void Experiment::Snapshot__Programs(size_t u) {
+  std::string snapshot_dir = DATA_DIRECTORY + "pop_" + emp::to_string((int)u);
+  mkdir(snapshot_dir.c_str(), ACCESSPERMS);
+  // For each program in the population, dump the full program description in a single file.
+  std::ofstream prog_ofstream(snapshot_dir + "/pop_" + emp::to_string((int)u) + ".pop");
+  for (size_t i = 0; i < world->GetSize(); ++i) {
+    if (!world->IsOccupied(i)) continue;
+    prog_ofstream << "==="<<i<<":"<<world->CalcFitnessID(i)<<"===\n";
+    Agent & agent = world->GetOrg(i);
+    agent.program.PrintProgramFull(prog_ofstream);
+  }
+  prog_ofstream.close();
+}
 
+void Experiment::Snapshot__Stats(size_t u) {
+  // TODO: implement
 }
 
 // == Configuration functions ==
-void Experiment::DoConfig__Hardware() {
-
-}
 void Experiment::DoConfig__Tasks() {
+  // Zero out task inputs.
+  for (size_t i = 0; i < MAX_TASK_NUM_INPUTS; ++i) task_inputs[i] = 0;
+  // Add tasks to task set.
+  // NAND
+  task_set.AddTask("NAND", [](taskset_t::Task & task, const std::array<task_io_t, MAX_TASK_NUM_INPUTS> & inputs) {
+    const task_io_t a = inputs[0], b = inputs[1];
+    task.solutions.emplace_back(~(a&b));
+  }, "NAND task");
+  // NOT
+  task_set.AddTask("NOT", [](taskset_t::Task & task, const std::array<task_io_t, MAX_TASK_NUM_INPUTS> & inputs) {
+    const task_io_t a = inputs[0], b = inputs[1];
+    task.solutions.emplace_back(~a);
+    task.solutions.emplace_back(~b);
+  }, "NOT task");
+  // ORN
+  task_set.AddTask("ORN", [](taskset_t::Task & task, const std::array<task_io_t, MAX_TASK_NUM_INPUTS> & inputs) {
+    const task_io_t a = inputs[0], b = inputs[1];
+    task.solutions.emplace_back((a|(~b)));
+    task.solutions.emplace_back((b|(~a)));
+  }, "ORN task");
+  // AND
+  task_set.AddTask("AND", [](taskset_t::Task & task, const std::array<task_io_t, MAX_TASK_NUM_INPUTS> & inputs) {
+    const task_io_t a = inputs[0], b = inputs[1];
+    task.solutions.emplace_back(a&b);
+  }, "AND task");
+  // OR
+  task_set.AddTask("OR", [](taskset_t::Task & task, const std::array<task_io_t, MAX_TASK_NUM_INPUTS> & inputs) {
+    const task_io_t a = inputs[0], b = inputs[1];
+    task.solutions.emplace_back(a|b);
+  }, "OR task");
+  // ANDN
+  task_set.AddTask("ANDN", [](taskset_t::Task & task, const std::array<task_io_t, MAX_TASK_NUM_INPUTS> & inputs) {
+    const task_io_t a = inputs[0], b = inputs[1];
+    task.solutions.emplace_back((a&(~b)));
+    task.solutions.emplace_back((b&(~a)));
+  }, "ANDN task");
+  // NOR
+  task_set.AddTask("NOR", [](taskset_t::Task & task, const std::array<task_io_t, MAX_TASK_NUM_INPUTS> & inputs) {
+    const task_io_t a = inputs[0], b = inputs[1];
+    task.solutions.emplace_back(~(a|b));
+  }, "NOR task");
+  // XOR
+  task_set.AddTask("XOR", [](taskset_t::Task & task, const std::array<task_io_t, MAX_TASK_NUM_INPUTS> & inputs) {
+    const task_io_t a = inputs[0], b = inputs[1];
+    task.solutions.emplace_back(a^b);
+  }, "XOR task");
+  // EQU
+  task_set.AddTask("EQU", [](taskset_t::Task & task, const std::array<task_io_t, MAX_TASK_NUM_INPUTS> & inputs) {
+    const task_io_t a = inputs[0], b = inputs[1];
+    task.solutions.emplace_back(~(a^b));
+  }, "EQU task");
+  // ECHO
+  task_set.AddTask("ECHO", [](taskset_t::Task & task, const std::array<task_io_t, MAX_TASK_NUM_INPUTS> & inputs) {
+    const task_io_t a = inputs[0], b = inputs[1];
+    task.solutions.emplace_back(a);
+    task.solutions.emplace_back(b);
+  }, "ECHO task");
+}
+
+void Experiment::DoConfig__Hardware() {
+  // - Setup the instruction set. -
+  // Standard instructions:
+  inst_lib->AddInst("Inc", hardware_t::Inst_Inc, 1, "Increment value in local memory Arg1");
+  inst_lib->AddInst("Dec", hardware_t::Inst_Dec, 1, "Decrement value in local memory Arg1");
+  inst_lib->AddInst("Not", hardware_t::Inst_Not, 1, "Logically toggle value in local memory Arg1");
+  inst_lib->AddInst("Add", hardware_t::Inst_Add, 3, "Local memory: Arg3 = Arg1 + Arg2");
+  inst_lib->AddInst("Sub", hardware_t::Inst_Sub, 3, "Local memory: Arg3 = Arg1 - Arg2");
+  inst_lib->AddInst("Mult", hardware_t::Inst_Mult, 3, "Local memory: Arg3 = Arg1 * Arg2");
+  inst_lib->AddInst("Div", hardware_t::Inst_Div, 3, "Local memory: Arg3 = Arg1 / Arg2");
+  inst_lib->AddInst("Mod", hardware_t::Inst_Mod, 3, "Local memory: Arg3 = Arg1 % Arg2");
+  inst_lib->AddInst("TestEqu", hardware_t::Inst_TestEqu, 3, "Local memory: Arg3 = (Arg1 == Arg2)");
+  inst_lib->AddInst("TestNEqu", hardware_t::Inst_TestNEqu, 3, "Local memory: Arg3 = (Arg1 != Arg2)");
+  inst_lib->AddInst("TestLess", hardware_t::Inst_TestLess, 3, "Local memory: Arg3 = (Arg1 < Arg2)");
+  inst_lib->AddInst("If", hardware_t::Inst_If, 1, "Local memory: If Arg1 != 0, proceed; else, skip block.", emp::ScopeType::BASIC, 0, {"block_def"});
+  inst_lib->AddInst("While", hardware_t::Inst_While, 1, "Local memory: If Arg1 != 0, loop; else, skip block.", emp::ScopeType::BASIC, 0, {"block_def"});
+  inst_lib->AddInst("Countdown", hardware_t::Inst_Countdown, 1, "Local memory: Countdown Arg1 to zero.", emp::ScopeType::BASIC, 0, {"block_def"});
+  inst_lib->AddInst("Close", hardware_t::Inst_Close, 0, "Close current block if there is a block to close.", emp::ScopeType::BASIC, 0, {"block_close"});
+  inst_lib->AddInst("Break", hardware_t::Inst_Break, 0, "Break out of current block.");
+  inst_lib->AddInst("Call", hardware_t::Inst_Call, 0, "Call function that best matches call affinity.", emp::ScopeType::BASIC, 0, {"affinity"});
+  inst_lib->AddInst("Return", hardware_t::Inst_Return, 0, "Return from current function if possible.");
+  inst_lib->AddInst("SetMem", hardware_t::Inst_SetMem, 2, "Local memory: Arg1 = numerical value of Arg2");
+  inst_lib->AddInst("CopyMem", hardware_t::Inst_CopyMem, 2, "Local memory: Arg1 = Arg2");
+  inst_lib->AddInst("SwapMem", hardware_t::Inst_SwapMem, 2, "Local memory: Swap values of Arg1 and Arg2.");
+  inst_lib->AddInst("Input", hardware_t::Inst_Input, 2, "Input memory Arg1 => Local memory Arg2.");
+  inst_lib->AddInst("Output", hardware_t::Inst_Output, 2, "Local memory Arg1 => Output memory Arg2.");
+  inst_lib->AddInst("Commit", hardware_t::Inst_Commit, 2, "Local memory Arg1 => Shared memory Arg2.");
+  inst_lib->AddInst("Pull", hardware_t::Inst_Pull, 2, "Shared memory Arg1 => Shared memory Arg2.");
+  inst_lib->AddInst("Nop", hardware_t::Inst_Nop, 0, "No operation.");
+  inst_lib->AddInst("Fork", Inst_Fork, 0, "Fork a new thread. Local memory contents of callee are loaded into forked thread's input memory.");
+  inst_lib->AddInst("Terminate", Inst_Terminate, 0, "Kill current thread.");
+
+  // Add experiment-specific instructions
+  if (TASKS_ON) {
+    inst_lib->AddInst("Load-1", [this](hardware_t & hw, const inst_t & inst) { this->Inst_Load1(hw, inst); }, 1, "WM[ARG1] = TaskInput[LOAD_ID]; LOAD_ID++;");
+    inst_lib->AddInst("Load-2", [this](hardware_t & hw, const inst_t & inst) { this->Inst_Load2(hw, inst); }, 2, "WM[ARG1] = TASKINPUT[0]; WM[ARG2] = TASKINPUT[1];");
+    inst_lib->AddInst("Submit", [this](hardware_t & hw, const inst_t & inst) { this->Inst_Submit(hw, inst); }, 1, "Submit WM[ARG1] as potential task solution.");
+    inst_lib->AddInst("Nand", Inst_Nand, 3, "WM[ARG3]=~(WM[ARG1]&WM[ARG2])");
+  }
+
+  // Add 1 set state instruction for every possible environment state.
+  for (size_t i = 0; i < ENVIRONMENT_STATES; ++i) {
+    inst_lib->AddInst("SetState-" + emp::to_string(i),
+      [i](hardware_t & hw, const inst_t & inst) {
+        hw.SetTrait(TRAIT_ID__STATE, i);
+      }, 0, "Set internal state to " + emp::to_string(i));
+  }
+
+  // Add events!
+  if (SGP_ENVIRONMENT_SIGNALS) {
+    // Use event-driven events.
+    event_lib->AddEvent("EnvSignal", HandleEvent__EnvSignal_ED, "");
+    event_lib->RegisterDispatchFun("EnvSignal", DispatchEvent__EnvSignal_ED);
+  } else {
+    // Use nop events.
+    event_lib->AddEvent("EnvSignal", HandleEvent__EnvSignal_IMP, "");
+    event_lib->RegisterDispatchFun("EnvSignal", DispatchEvent__EnvSignal_IMP);
+  }
+
+  // Add sensors!
+  if (SGP_ACTIVE_SENSORS) {
+    // Add sensors to instruction set.
+    for (int i = 0; i < ENVIRONMENT_STATES; ++i) {
+      inst_lib->AddInst("SenseState-" + emp::to_string(i),
+        [this, i](hardware_t & hw, const inst_t & inst) {
+          state_t & state = hw.GetCurState();
+          state.SetLocal(inst.args[0], this->env_state==i);
+        }, 1, "Sense if current environment state is " + emp::to_string(i));
+    }
+  } else {
+    // Add equivalent number of non-functional sensors.
+    for (int i = 0; i < ENVIRONMENT_STATES; ++i) {
+      inst_lib->AddInst("SenseState-" + emp::to_string(i),
+        [this, i](hardware_t & hw, const inst_t & inst) { return; }, 0,
+        "Sense if current environment state is " + emp::to_string(i));
+    }
+  }
+
+  // Configure evaluation hardware.
+  eval_hw = emp::NewPtr<hardware_t>(inst_lib, event_lib, random);
+  eval_hw->SetMinBindThresh(SGP_HW_MIN_BIND_THRESH);
+  eval_hw->SetMaxCores(SGP_HW_MAX_CORES);
+  eval_hw->SetMaxCallDepth(SGP_HW_MAX_CALL_DEPTH);
+
+  max_inst_entropy = -1 * emp::Log2(1.0/((double)inst_lib->GetSize()));
+  std::cout << "Maximum instruction entropy: " << max_inst_entropy << std::endl;
+
+  inst_ent_fun = [](agent_t & agent) {
+    emp::vector<inst_t> inst_seq;
+    program_t & prog = agent.GetGenome();
+    for (size_t i = 0; i < prog.GetSize(); ++i) {
+      for (size_t k = 0; k < prog[i].GetSize(); ++k) {
+        inst_seq.emplace_back(prog[i][k].id);
+      }
+    }
+    const double ent = emp::ShannonEntropy(inst_seq);
+    return ent;
+  };
+  
+  func_cnt_fun = [this](agent_t & agent) {
+    return (int)functions_used.size();
+  };
 
 }
+
 void Experiment::DoConfig__Evolution() {
+  world->SetPopStruct_Mixed(true);
+  world->SetFitFun([this](agent_t & agent) {
+    return this->calc_score(agent);
+  });
 
 }
+
 void Experiment::DoConfig__MAPElites() {
+  // TODO: write MAP-elites version!
+  world->SetCache(true);
+  world->SetFitFun([this](agent_t & agent) {
+    const size_t id = 0;
+    agent.SetID(id);
+    // eval_hw->SetProgram(agent.GetGenome());
+    // eval_hw->SetMinBindThresh(agent.GetSimilarityThreshold());
+    // Evaluate!
+    this->Evaluate(agent);
+    // TODO: finish this!
+    // Find min trial.
+    // agent_phen_cache[id].SetMinTrial();
+    // agent_phen_cache[id].SetInstEntropy(inst_ent_fun(agent));
+    // const double score = agent_phen_cache[id].GetMinScore();
+    // if (score > best_score) { best_score = score; dom_agent_id = id; }
+
+    return 0.0;
+
+  });
 
 }
+
+  // do_begin_run_setup_sig --> Specific
+  // do_evaluation_sig      --> Specific
+  // do_selection_sig       --> Specific
+  // do_world_update_sig    --> Both
+  
+  // end_agent_eval_sig     --> General
+  // do_agent_trial_sig     --> General
+
 void Experiment::DoConfig__Experiment() {
+  // Make a data directory. 
+  mkdir(DATA_DIRECTORY.c_str(), ACCESSPERMS);
+  if (DATA_DIRECTORY.back() != '/') DATA_DIRECTORY += '/';
 
+  world->Reset(); 
+
+  world->SetMutFun([this](agent_t & agent, emp::Random & rnd) {
+    return this->mutate_agent(agent, rnd);
+  });
+
+  
+  eval_hw->OnBeforeFuncCall([this](hardware_t & hw, size_t fID) {
+    functions_used.emplace(fID);
+  });
+  eval_hw->OnBeforeCoreSpawn([this](hardware_t & hw, size_t fID) {
+    functions_used.emplace(fID);
+  });
+
+  // Configure score.
+  //  - If tasks: 
+  //  - else: 
+  if (TASKS_ON) {
+    calc_score = [this](agent_t & agent) {
+      double score = 0;
+      phenotype_t & phen = phen_cache.Get(agent.GetID(), trial_id);
+      score += phen.GetUniqueTasksCompleted();
+      score += phen.GetUniqueTasksCredited();
+      if (phen.GetTimeAllTasksCredited()) {
+        score += (EVAL_TIME - phen.GetTimeAllTasksCredited());
+      }
+      score += phen.GetEnvMatchScore();
+      return score;
+    };
+  } else {
+    calc_score = [this](agent_t & agent) {
+      return phen_cache.Get(agent.GetID(), trial_id).GetEnvMatchScore();
+    };
+  }
+
+  // Population initialization!
+  switch (POP_INIT_METHOD) {
+    case POP_INIT_METHOD_ID__ANCESTOR: {
+      do_pop_init_sig.AddAction([this]() {
+        this->InitPopulation__FromAncestorFile();
+      });
+      break;
+    }
+    case POP_INIT_METHOD_ID__RANDOM: {
+      do_pop_init_sig.AddAction([this]() {
+        this->InitPopulation__Random();
+      });
+      break;
+    }
+    default: {
+      std::cout << "Unrecognized population initialization mode (" << POP_INIT_METHOD << "). Exiting..." << std::endl;
+      exit(-1);
+    }
+  }
+
+  // Configure signals
+  // - Pop snapshots!
+  do_pop_snapshot_sig.AddAction([this](size_t u) { this->Snapshot__Programs(u); });
+  do_pop_snapshot_sig.AddAction([this](size_t u) { this->Snapshot__Stats(u); });
+
+  // - Begin agent eval signal
+  begin_agent_eval_sig.AddAction([this](agent_t & agent) {
+    eval_hw->SetProgram(agent.GetGenome());
+  });
+  if (EVOLVE_SIMILARITY_THRESH) {
+    begin_agent_eval_sig.AddAction([this](agent_t & agent) {
+      eval_hw->SetMinBindThresh(agent.GetSimilarityThreshold());
+    });
+  }
+
+  // - Begin trial info!
+  begin_agent_trial_sig.AddAction([this](agent_t & agent) {
+    // 1) reset environment state
+    env_state = (size_t)-1;
+    // 2) Reset tasks. 
+    this->ResetTasks();
+    input_load_id = 0;
+    // 3) Reset hardware.
+    functions_used.clear();
+    eval_hw->ResetHardware();
+    eval_hw->SetTrait(TRAIT_ID__STATE, -1);
+    // For now, not spawning a core... 
+  });
+
+  do_agent_trial_sig.AddAction([this](agent_t & agent) {
+    for (trial_time = 0; trial_time < EVAL_TIME; ++trial_time) {
+      // 1) Advance environment.
+      do_env_advance_sig.Trigger();
+      // 2) Advance agent.
+      do_agent_advance_sig.Trigger(agent);
+    }
+  });
+  
+  end_agent_trial_sig.AddAction([this](agent_t & agent) {
+    const size_t agent_id = agent.GetID();
+    phenotype_t & phen = phen_cache.Get(agent_id, trial_id);
+    // Record everything that must be recorded post-trial
+    phen.SetFunctionsUsed(this->func_cnt_fun(agent));
+    phen.SetInstEntropy(this->inst_ent_fun(agent));
+    phen.SetSimilarityThreshold(agent.GetSimilarityThreshold());
+    phen.SetTimeAllTasksCredited(task_set.GetAllTasksCreditedTime());
+    phen.SetUniqueTasksCompleted(task_set.GetUniqueTasksCompleted());
+    phen.SetUniqueTasksCredited(task_set.GetUniqueTasksCredited());
+    phen.SetTotalWastedCompletions(task_set.GetTotalTasksWasted());
+    for (size_t taskID = 0; taskID < task_set.GetSize(); ++taskID) {
+      phen.SetCredited(taskID, task_set.GetTask(taskID).GetCreditedCnt());
+      phen.SetCompleted(taskID, task_set.GetTask(taskID).GetCompletionCnt());
+      phen.SetWastedCompletions(taskID, task_set.GetTask(taskID).GetWastedCompletionsCnt());
+    }
+    phen.SetScore(calc_score(agent));
+  });
+
+  do_agent_advance_sig.AddAction([this](agent_t & agent) {
+    const size_t agent_id = agent.GetID();
+    eval_hw->SingleProcess();
+    if ((size_t)eval_hw->GetTrait(TRAIT_ID__STATE) == env_state) {
+      phen_cache.Get(agent_id, trial_id).IncEnvMatchScore();
+    }
+  });
+
+  switch(ENVIRONMENT_CHANGE_METHOD) {
+    case ENV_CHG_METHOD_ID__RANDOM: {
+      do_env_advance_sig.AddAction([this]() {
+        if (env_state == (size_t)-1 || random->P(ENVIRONMENT_CHANGE_PROB)) {
+          // Trigger change!
+          // 1) Change the environment to a random state.
+          env_state = random->GetUInt(ENVIRONMENT_STATES);
+          // 2) Trigger environment state event.
+          eval_hw->TriggerEvent("EnvSignal", env_state_tags[env_state]);
+        }
+      });
+      break;
+    }
+    case ENV_CHG_METHOD_ID__REGULAR: {
+      do_env_advance_sig.AddAction([this]() {
+        if (env_state == (size_t)-1 || ((trial_time % ENVIRONMENT_CHANGE_INTERVAL) == 0)) {
+          // Trigger change!
+          // 1) Change the environment to a random state.
+          env_state = random->GetUInt(ENVIRONMENT_STATES);
+          // 2) Trigger environment state event.
+          eval_hw->TriggerEvent("EnvSignal", env_state_tags[env_state]);
+        }
+      });
+      break;
+    }
+    default: {
+      std::cout << "Unrecognized environment change method. Exiting..." << std::endl;
+      exit(-1);
+    }
+  }
+
+  // If distraction signals...
+  if (ENVIRONMENT_DISTRACTION_SIGNALS) {
+    do_env_advance_sig.AddAction([this]() {
+      if (random->P(ENVIRONMENT_DISTRACTION_SIGNAL_PROB)) {
+        const size_t id = random->GetUInt(distraction_sig_tags.size());
+        eval_hw->TriggerEvent("EnvSignal", distraction_sig_tags[id]);
+      }
+    });
+  }
 }
+
 void Experiment::DoConfig__Analysis() {
 
 }
