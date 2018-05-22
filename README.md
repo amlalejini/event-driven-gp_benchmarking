@@ -21,23 +21,29 @@ For each documented adventure, see the README.md file in the adventure's directo
 These adventures are generally used to test a single aspect of SignalGP (typically a new feature while I'm developing it). 
 
 ### Test: Function Regulation
-This test can be found here: [adventures/test__function_reg](adventures/test__function_reg)
+This test can be found here: [./adventures/test__function_reg](adventures/test__function_reg)
 
 
 ## Experiments
 These adventures are experiments. Experiments either aim to explore/demonstrate a particular SignalGP feature or aim to use SignalGP as an evolutionary substrate to explore a question or to solve a problem. 
 
 ### Experiment: A-B Response
-This test can be found here: [adventures/ab_response](adventures/ab_response)
+This experiment can be found here: [./adventures/ab_response](adventures/ab_response)
 
 The A-B response problem is designed as a simple toy problem meant to test/demonstrate function regulation in SignalGP. 
 
-### Experiment: Division of Labor
-This test can be found here: [adventures/div_of_labor](adventures/div_of_labor)
+### Experiment: Environment Coordination
+This experiment can be found here: [./adventures/env_coordination](./adventures/env_coordination)
 
+The environment coordination experiment is designed to be a simple toy problem that tests the capacity for SignalGP agents to coordinate with external signals. 
+
+### Experiment: Division of Labor
+This experiment can be found here: [./adventures/div_of_labor](adventures/div_of_labor)
+
+**WARNING**: this experiment is unfinished/undocumented.
 
 ### Experiment: T-Maze
-This test can be found here: [adventures/t_maze](adventures/t_maze)
+This experiment can be found here: [./adventures/t_maze](adventures/t_maze)
 
 The T-maze problem is meant to test/demonstrate function regulation in SignalGP. 
 
