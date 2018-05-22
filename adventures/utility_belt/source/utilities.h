@@ -53,6 +53,48 @@ namespace toolbelt {
     return tags;
   }
 
+  /// Generate random tags. Can guarantee uniqueness. 
+  template<size_t TAG_WIDTH>
+  emp::vector<typename emp::EventDrivenGP_AW<TAG_WIDTH>::affinity_t> GenerateRandomTags(emp::Random & rnd, size_t tag_cnt, 
+                                                                                        const emp::vector<typename emp::EventDrivenGP_AW<TAG_WIDTH>::affinity_t> & others, 
+                                                                                        bool guarantee_unique=true) {
+    using tag_t = typename emp::EventDrivenGP_AW<TAG_WIDTH>::affinity_t;
+    if (guarantee_unique) {
+      if (tag_cnt + others.size() > emp::Pow2(TAG_WIDTH)) {
+        std::cout << "Number of requested unique tags (" << tag_cnt << ") exceeds limit! Exiting..." << std::endl;
+        exit(-1);
+      }
+    }  
+    std::unordered_set<int> uset; // We'll use this to ensure all maze tags are unique.
+    emp::vector<tag_t> tags;
+    if (guarantee_unique) {
+      // Add other tags (that we don't want to collide with generated tags) to uset.
+      for (size_t i = 0; i < others.size(); ++i) {
+        int tag_int = others[i].GetUInt(0);
+        uset.emplace(tag_int);
+      }
+    }
+    // Generate new tags!
+    for (size_t i = 0; i < tag_cnt; ++i) {
+      tags.emplace_back(tag_t());
+      tags[i].Randomize(rnd);
+      if (guarantee_unique) {
+        // If we guarantee uniqueness, keep regenerating tags until we haven't seen one before. 
+        int tag_int = tags[i].GetUInt(0);
+        while (true) {
+          if (!emp::Has(uset, tag_int)) {
+            uset.emplace(tag_int);
+            break;
+          } else {
+            tags[i].Randomize(rnd);
+            tag_int = tags[i].GetUInt(0);
+          }
+        }
+      }
+    }
+    return tags;
+  }
+
   /// SignalGPMutator implements the standard mutation function that I use for 
   /// most SignalGP experiments.
   // TODO: 
