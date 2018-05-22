@@ -8,6 +8,10 @@ The problem scales in difficulty as *K* increases. Agents adjust their internal 
 
 Agents can monitor environmental changes in a two ways: 1) by responding to signals produced by environmental changes and 2) by using sensory instructions to poll the environment for changes.
 
+Additional (configurable) tasks in this experiment code:
+- Handling distraction signals
+- Performing 10 different one and two input logic operations (ECHO, NAND, ...., EQUALS). 
+
 I've used this or a variant of this problem in the following papers: (Lalejini and Ofria, 2018). 
 
 # TODOs
