@@ -49,6 +49,10 @@ constexpr size_t ENV_CHG_METHOD_ID__REGULAR = 1;
 
 constexpr size_t TRAIT_ID__STATE = 0;
 
+constexpr size_t SELECTION_METHOD_ID__TOURNAMENT = 0;
+
+constexpr double MIN_POSSIBLE_SCORE = -32767;
+
 class Experiment {
 public:
   // Forward declarations.
@@ -296,8 +300,8 @@ protected:
   bool MAP_ELITES_AXIS__INST_ENTROPY; 
   bool MAP_ELITES_AXIS__FUNCTIONS_USED; 
   bool MAP_ELITES_AXIS__SIMILARITY_THRESH; 
-  double MAP_ELITES_AXIS_RES__INST_ENTROPY; 
-  double MAP_ELITES_AXIS_RES__SIMILARITY_THRESH; 
+  size_t MAP_ELITES_AXIS_RES__INST_ENTROPY; 
+  size_t MAP_ELITES_AXIS_RES__SIMILARITY_THRESH; 
   // == SGP_PROGRAM_GROUP ==
   size_t SGP_PROG_MAX_FUNC_CNT; 
   size_t SGP_PROG_MIN_FUNC_CNT; 
@@ -311,6 +315,8 @@ protected:
   size_t SGP_HW_MAX_CALL_DEPTH; 
   double SGP_HW_MIN_BIND_THRESH; 
   // == SGP_MUTATION_GROUP ==
+  double SGP_MUT_PER_AGENT__SIM_THRESH_RATE;
+  double SGP_MUT_PER_AGENT__SIM_THRESH_STD;
   int SGP_MUT_PROG_MAX_ARG_VAL; 
   double SGP_MUT_PER_BIT__TAG_BFLIP_RATE; 
   double SGP_MUT_PER_INST__SUB_RATE; 
@@ -337,6 +343,8 @@ protected:
   emp::Ptr<event_lib_t> event_lib;  ///< SignalGP event library
 
   emp::Ptr<hardware_t> eval_hw;     ///< SignalGP virtual hardware used for evaluation
+
+  toolbelt::SignalGPMutator<hardware_t> mutator;
 
   emp::vector<tag_t> env_state_tags;        ///< Tags associated with each environment state.
   emp::vector<tag_t> distraction_sig_tags;  ///< Tags associated with distraction signals.
@@ -387,6 +395,7 @@ protected:
   // For MAP-Elites
   std::function<double(agent_t &)> inst_ent_fun;
   std::function<int(agent_t &)> func_cnt_fun;
+  std::function<double(agent_t &)> get_sim_thresh_fun;
 
   std::function<size_t(agent_t &, emp::Random &)> mutate_agent;
 
@@ -421,7 +430,8 @@ protected:
 
 public:
   Experiment(const L9ChgEnvConfig & config)
-    : input_load_id(0),
+    : mutator(),
+      input_load_id(0),
       update(0),
       trial_id(0),
       trial_time(0),
@@ -476,6 +486,8 @@ public:
     SGP_HW_MAX_CALL_DEPTH = config.SGP_HW_MAX_CALL_DEPTH(); 
     SGP_HW_MIN_BIND_THRESH = config.SGP_HW_MIN_BIND_THRESH(); 
     // == SGP_MUTATION_GROUP ==
+    SGP_MUT_PER_AGENT__SIM_THRESH_RATE = config.SGP_MUT_PER_AGENT__SIM_THRESH_RATE();
+    SGP_MUT_PER_AGENT__SIM_THRESH_STD = config.SGP_MUT_PER_AGENT__SIM_THRESH_STD();
     SGP_MUT_PROG_MAX_ARG_VAL = config.SGP_MUT_PROG_MAX_ARG_VAL(); 
     SGP_MUT_PER_BIT__TAG_BFLIP_RATE = config.SGP_MUT_PER_BIT__TAG_BFLIP_RATE(); 
     SGP_MUT_PER_INST__SUB_RATE = config.SGP_MUT_PER_INST__SUB_RATE(); 
@@ -544,20 +556,34 @@ public:
     event_lib = emp::NewPtr<event_lib_t>();
     eval_hw = emp::NewPtr<hardware_t>(inst_lib, event_lib, random);
 
-    
+    // Configure the mutator
+    mutator.SetProgMinFuncCnt(SGP_PROG_MIN_FUNC_CNT);
+    mutator.SetProgMaxFuncCnt(SGP_PROG_MAX_FUNC_CNT);
+    mutator.SetProgMinFuncLen(SGP_PROG_MIN_FUNC_LEN);
+    mutator.SetProgMaxFuncLen(SGP_PROG_MAX_FUNC_LEN);
+    mutator.SetProgMaxTotalLen(SGP_PROG_MAX_TOTAL_LEN);
+    mutator.SetProgMaxArgVal(SGP_MUT_PROG_MAX_ARG_VAL);
+    mutator.SetPerBitTagBitFlipRate(SGP_MUT_PER_BIT__TAG_BFLIP_RATE);
+    mutator.SetPerInstSubRate(SGP_MUT_PER_INST__SUB_RATE);
+    mutator.SetPerInstInsRate(SGP_MUT_PER_INST__INS_RATE);
+    mutator.SetPerInstDelRate(SGP_MUT_PER_INST__DEL_RATE);
+    mutator.SetPerFuncSlipRate(SGP_MUT_PER_FUNC__SLIP_RATE);
+    mutator.SetPerFuncDupRate(SGP_MUT_PER_FUNC__FUNC_DUP_RATE);
+    mutator.SetPerFuncDelRate(SGP_MUT_PER_FUNC__FUNC_DEL_RATE);
+
     // Configure hardware, etc
     DoConfig__Tasks();
     DoConfig__Hardware();
 
     switch (RUN_MODE) {
       case RUN_ID__EVO: {
-        DoConfig__Evolution();
         DoConfig__Experiment();
+        DoConfig__Evolution();
         break;
       }
       case RUN_ID__MAPE: {
-        DoConfig__MAPElites();
         DoConfig__Experiment();
+        DoConfig__MAPElites();
         break;
       }
       case RUN_ID__ANALYSIS: {
@@ -584,6 +610,11 @@ public:
   // === Run functions ===
   void Run();
   void RunStep();
+
+  // === Evolution functions ===
+  double GetFitness(agent_t & agent);
+
+  size_t MutateSimilarityThresh(agent_t & agent, emp::Random & rnd);
 
   // === Config functions ===
   void DoConfig__Hardware();
@@ -700,6 +731,25 @@ void Experiment::RunStep() {
   do_world_update_sig.Trigger();
 }
 
+// === Evolution functions ===
+double Experiment::GetFitness(agent_t & agent) {
+  const size_t aID = agent.GetID();
+  return phen_cache.GetRepresentativePhen(aID).GetScore();
+}
+
+size_t Experiment::MutateSimilarityThresh(agent_t & agent, emp::Random & rnd) {
+  // TODO: double check functionality of this mutation operator
+  if (rnd.P(SGP_MUT_PER_AGENT__SIM_THRESH_RATE)) {
+    double new_val = agent.GetSimilarityThreshold() + rnd.GetRandNormal(0, SGP_MUT_PER_AGENT__SIM_THRESH_STD);
+    if (new_val > 100.0) new_val = 100.0;
+    else if (new_val < 0.0) new_val = 0.0;
+
+    agent.SetSimilarityThreshold(new_val);
+    return 1;
+  }
+  return 0;
+}
+
 // == utility functions ==
 
 /// Utility function to save environment tags.
@@ -788,7 +838,7 @@ void Experiment::InitPopulation__FromAncestorFile() {
 }
 
 void Experiment::InitPopulation__Random() {
-
+  // TODO: implement random init population
 }
 
 // == Systematics functions ==
@@ -974,47 +1024,111 @@ void Experiment::DoConfig__Hardware() {
     return (int)functions_used.size();
   };
 
+  get_sim_thresh_fun = [](agent_t & agent) {
+    return agent.GetSimilarityThreshold(); 
+  };
+
 }
 
 void Experiment::DoConfig__Evolution() {
+  std::cout << "Configure good 'old evolution experiment." << std::endl;
+
   world->SetPopStruct_Mixed(true);
-  world->SetFitFun([this](agent_t & agent) {
-    return this->calc_score(agent);
+  world->SetFitFun([this](agent_t & agent) { return this->GetFitness(agent); });
+
+  // Do evaluation!
+  do_evaluation_sig.AddAction([this]() {
+    best_score = MIN_POSSIBLE_SCORE;
+    dom_agent_id = 0;
+    for (size_t id = 0; id < world->GetSize(); ++id) {
+      // Load and configure the agent.
+      agent_t & our_hero = world->GetOrg(id);
+      our_hero.SetID(id);
+      // Evaluate!
+      this->Evaluate(our_hero);
+      // Grab the score!
+      double score = GetFitness(our_hero);
+      if (score > best_score) { best_score = score; dom_agent_id = id; }
+    }
+    std::cout << "Update: " << update << " Max score: " << best_score << std::endl;
+    if (update % POP_SNAPSHOT_INTERVAL == 0) do_pop_snapshot_sig.Trigger(update);
   });
+
+  do_begin_run_setup_sig.AddAction([this]() {
+    // TODO: finish this
+    // this->AddDominantFile(DATA_DIRECTORY + "dominant.csv").SetTimingRepeat(SYSTEMATICS_INTERVAL);
+  });
+
+  // Setup selection
+  switch (SELECTION_METHOD) {
+    case SELECTION_METHOD_ID__TOURNAMENT: {
+      do_selection_sig.AddAction([this]() {
+        emp::EliteSelect(*world, ELITE_SELECT__ELITE_CNT, 1);
+        emp::TournamentSelect(*world, TOURNAMENT_SIZE, POP_SIZE - ELITE_SELECT__ELITE_CNT);
+      });
+      break;
+    }
+    default: {
+      std::cout << "Unrecognized selection method id (" << SELECTION_METHOD << "). Exiting..." << std::endl;
+      exit(-1);
+    }
+  }
 
 }
 
 void Experiment::DoConfig__MAPElites() {
+  std::cout << "Configure the strange world of MAP-Elites." << std::endl;
+
   // TODO: write MAP-elites version!
   world->SetCache(true);
+
   world->SetFitFun([this](agent_t & agent) {
     const size_t id = 0;
     agent.SetID(id);
-    // eval_hw->SetProgram(agent.GetGenome());
-    // eval_hw->SetMinBindThresh(agent.GetSimilarityThreshold());
     // Evaluate!
     this->Evaluate(agent);
-    // TODO: finish this!
-    // Find min trial.
-    // agent_phen_cache[id].SetMinTrial();
-    // agent_phen_cache[id].SetInstEntropy(inst_ent_fun(agent));
-    // const double score = agent_phen_cache[id].GetMinScore();
-    // if (score > best_score) { best_score = score; dom_agent_id = id; }
-
-    return 0.0;
-
+    // Grab score
+    const double score = this->GetFitness(agent);
+    if (score > best_score) { best_score = score; dom_agent_id = id; }
+    return score;
   });
+
+  emp::vector<size_t> trait_bin_sizes;
+  if (MAP_ELITES_AXIS__INST_ENTROPY) {
+    world->AddPhenotype("InstEntropy", inst_ent_fun, 0.0, max_inst_entropy + 0.1);
+    trait_bin_sizes.emplace_back(MAP_ELITES_AXIS_RES__INST_ENTROPY);
+  }
+  if (MAP_ELITES_AXIS__FUNCTIONS_USED) {
+    world->AddPhenotype("FunctionsUsed", func_cnt_fun, SGP_PROG_MIN_FUNC_CNT, SGP_PROG_MAX_FUNC_CNT+1);
+    trait_bin_sizes.emplace_back(SGP_PROG_MAX_FUNC_CNT);
+  }
+  if (MAP_ELITES_AXIS__SIMILARITY_THRESH) {
+    world->AddPhenotype("SimilarityThreshold", get_sim_thresh_fun, 0.0, 100.0+1.0);
+    trait_bin_sizes.emplace_back(MAP_ELITES_AXIS_RES__SIMILARITY_THRESH);
+  }
+
+  emp::SetMapElites(*world, trait_bin_sizes);
+
+  do_evaluation_sig.AddAction([this]() {
+    best_score = MIN_POSSIBLE_SCORE;
+  });
+  
+  do_selection_sig.AddAction([this]() {
+    emp::RandomSelect(*world, POP_SIZE);
+    std::cout << "Update: " << update << " Best score (from this update): " << best_score << std::endl;
+  });
+
+  do_world_update_sig.AddAction([this]() {
+    world->ClearCache();
+  });
+
 
 }
 
   // do_begin_run_setup_sig --> Specific
   // do_evaluation_sig      --> Specific
   // do_selection_sig       --> Specific
-  // do_world_update_sig    --> Both
   
-  // end_agent_eval_sig     --> General
-  // do_agent_trial_sig     --> General
-
 void Experiment::DoConfig__Experiment() {
   // Make a data directory. 
   mkdir(DATA_DIRECTORY.c_str(), ACCESSPERMS);
@@ -1026,7 +1140,6 @@ void Experiment::DoConfig__Experiment() {
     return this->mutate_agent(agent, rnd);
   });
 
-  
   eval_hw->OnBeforeFuncCall([this](hardware_t & hw, size_t fID) {
     functions_used.emplace(fID);
   });
@@ -1055,6 +1168,21 @@ void Experiment::DoConfig__Experiment() {
     };
   }
 
+  // Configure mutations
+  if (EVOLVE_SIMILARITY_THRESH) {
+    mutate_agent = [this](agent_t & agent, emp::Random & rnd) {
+      program_t & program = agent.GetGenome();
+      size_t mut_cnt = mutator.ApplyMutations(program, rnd);
+      mut_cnt += this->MutateSimilarityThresh(agent, rnd);
+      return mut_cnt;
+    };
+  } else {
+    mutate_agent = [this](agent_t & agent, emp::Random & rnd) {
+      program_t & program = agent.GetGenome();
+      return mutator.ApplyMutations(program, rnd);
+    };
+  }
+
   // Population initialization!
   switch (POP_INIT_METHOD) {
     case POP_INIT_METHOD_ID__ANCESTOR: {
@@ -1080,15 +1208,36 @@ void Experiment::DoConfig__Experiment() {
   do_pop_snapshot_sig.AddAction([this](size_t u) { this->Snapshot__Programs(u); });
   do_pop_snapshot_sig.AddAction([this](size_t u) { this->Snapshot__Stats(u); });
 
+  // - Do world update
+  do_world_update_sig.AddAction([this]() {
+    world->Update();
+  });
+
+  // - Do begin run setup (common to MAP-elites and regular EA)
+  do_begin_run_setup_sig.AddAction([this]() {
+    std::cout << "Doing initial run setup." << std::endl;
+    // Setup systematics/fitness tracking.
+    auto & sys_file = world->SetupSystematicsFile(DATA_DIRECTORY + "systematics.csv");
+    sys_file.SetTimingRepeat(SYSTEMATICS_INTERVAL);
+    auto & fit_file = world->SetupFitnessFile(DATA_DIRECTORY + "fitness.csv");
+    fit_file.SetTimingRepeat(FITNESS_INTERVAL);
+    do_pop_init_sig.Trigger();
+  });
+
   // - Begin agent eval signal
   begin_agent_eval_sig.AddAction([this](agent_t & agent) {
     eval_hw->SetProgram(agent.GetGenome());
   });
   if (EVOLVE_SIMILARITY_THRESH) {
+    // Set similarity threshold on eval hardware at beginning of evaluation.
     begin_agent_eval_sig.AddAction([this](agent_t & agent) {
       eval_hw->SetMinBindThresh(agent.GetSimilarityThreshold());
     });
   }
+
+  end_agent_eval_sig.AddAction([this](agent_t & agent) {
+    phen_cache.SetRepresentativeEval(agent.GetID());
+  });
 
   // - Begin trial info!
   begin_agent_trial_sig.AddAction([this](agent_t & agent) {
