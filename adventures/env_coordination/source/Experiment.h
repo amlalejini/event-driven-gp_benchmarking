@@ -101,7 +101,7 @@ public:
 
     program_t & GetGenome() { return program; }
   };
-
+  // TODO: reset phenotype on begin trial... 
   /// Phenotype of agents being evolved.
   struct Phenotype {
     double env_match_score;
@@ -545,7 +545,7 @@ public:
       std::cout << std::endl;
     }
     std::cout << "Distraction signal tags (" << distraction_sig_tags.size() << "): " << std::endl;
-    for (size_t i = 0; i < env_state_tags.size(); ++i) {
+    for (size_t i = 0; i < distraction_sig_tags.size(); ++i) {
       std::cout << i << ":";
       distraction_sig_tags[i].Print();
       std::cout << std::endl;
@@ -838,7 +838,30 @@ void Experiment::InitPopulation__FromAncestorFile() {
 }
 
 void Experiment::InitPopulation__Random() {
-  // TODO: implement random init population
+  world->OnInjectReady([this](agent_t & agent) {
+    // Randomize similarity threshold
+    agent.SetSimilarityThreshold(random->GetDouble(0.0, 100.0));
+  });
+  // Inject random agents up to population size.
+  for (size_t i = 0; i < POP_SIZE; ++i) {
+    program_t ancestor_prog(inst_lib);
+    size_t fcnt = random->GetUInt(1, SGP_PROG_MAX_FUNC_CNT);
+    for (size_t fID = 0; fID < fcnt; ++fID) {
+      hardware_t::Function new_fun;
+      new_fun.affinity.Randomize(*random);
+      size_t icnt = random->GetUInt(1, emp::Min((size_t)(SGP_PROG_MAX_TOTAL_LEN/SGP_PROG_MAX_FUNC_CNT), SGP_PROG_MAX_FUNC_LEN));
+      for (size_t iID = 0; iID < icnt; ++iID) {
+        new_fun.PushInst(random->GetUInt(ancestor_prog.GetInstLib()->GetSize()),
+                             random->GetInt(SGP_MUT_PROG_MAX_ARG_VAL),
+                             random->GetInt(SGP_MUT_PROG_MAX_ARG_VAL),
+                             random->GetInt(SGP_MUT_PROG_MAX_ARG_VAL),
+                             tag_t());
+        new_fun.inst_seq.back().affinity.Randomize(*random);
+      }
+      ancestor_prog.PushFunction(new_fun);
+    }
+    world->Inject(ancestor_prog, 1);  
+  }
 }
 
 // == Systematics functions ==
@@ -1000,7 +1023,6 @@ void Experiment::DoConfig__Hardware() {
   }
 
   // Configure evaluation hardware.
-  eval_hw = emp::NewPtr<hardware_t>(inst_lib, event_lib, random);
   eval_hw->SetMinBindThresh(SGP_HW_MIN_BIND_THRESH);
   eval_hw->SetMaxCores(SGP_HW_MAX_CORES);
   eval_hw->SetMaxCallDepth(SGP_HW_MAX_CALL_DEPTH);
@@ -1079,7 +1101,6 @@ void Experiment::DoConfig__Evolution() {
 void Experiment::DoConfig__MAPElites() {
   std::cout << "Configure the strange world of MAP-Elites." << std::endl;
 
-  // TODO: write MAP-elites version!
   world->SetCache(true);
 
   world->SetFitFun([this](agent_t & agent) {
@@ -1216,9 +1237,16 @@ void Experiment::DoConfig__Experiment() {
   // - Do begin run setup (common to MAP-elites and regular EA)
   do_begin_run_setup_sig.AddAction([this]() {
     std::cout << "Doing initial run setup." << std::endl;
+    // Setup phenotype task counts to match actual task counts.
+    for (size_t aID = 0; aID < POP_SIZE; ++aID) {
+      for (size_t tID = 0; tID < TRIAL_CNT; ++tID) {
+        phen_cache.Get(aID, tID).SetTaskCnt(task_set.GetSize());
+      }
+    }
     // Setup systematics/fitness tracking.
-    auto & sys_file = world->SetupSystematicsFile(DATA_DIRECTORY + "systematics.csv");
-    sys_file.SetTimingRepeat(SYSTEMATICS_INTERVAL);
+    // TODO: ask Emily about issue with setting up systematics file
+    // auto & sys_file = world->SetupSystematicsFile("default_systematics", DATA_DIRECTORY + "systematics.csv");
+    // sys_file.SetTimingRepeat(SYSTEMATICS_INTERVAL);
     auto & fit_file = world->SetupFitnessFile(DATA_DIRECTORY + "fitness.csv");
     fit_file.SetTimingRepeat(FITNESS_INTERVAL);
     do_pop_init_sig.Trigger();
@@ -1250,6 +1278,8 @@ void Experiment::DoConfig__Experiment() {
     functions_used.clear();
     eval_hw->ResetHardware();
     eval_hw->SetTrait(TRAIT_ID__STATE, -1);
+    // 4) Reset phenotype
+    phen_cache.Get(agent.GetID(), trial_id).Reset();
     // For now, not spawning a core... 
   });
 

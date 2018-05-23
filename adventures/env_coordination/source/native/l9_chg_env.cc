@@ -29,5 +29,5 @@ int main(int argc, char* argv[])
             << std::endl;
 
   Experiment e(config);
-  // e.Run();
+  e.Run();
 }
