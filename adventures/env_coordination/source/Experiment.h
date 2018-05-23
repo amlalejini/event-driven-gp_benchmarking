@@ -345,6 +345,7 @@ protected:
   size_t SYSTEMATICS_INTERVAL; 
   size_t FITNESS_INTERVAL; 
   size_t POP_SNAPSHOT_INTERVAL; 
+  size_t DOM_SNAPSHOT_TRIAL_CNT;
   std::string DATA_DIRECTORY; 
   // == ANALYSIS_GROUP ==
   size_t ANALYSIS_METHOD; 
@@ -516,6 +517,7 @@ public:
     SYSTEMATICS_INTERVAL = config.SYSTEMATICS_INTERVAL(); 
     FITNESS_INTERVAL = config.FITNESS_INTERVAL(); 
     POP_SNAPSHOT_INTERVAL = config.POP_SNAPSHOT_INTERVAL(); 
+    DOM_SNAPSHOT_TRIAL_CNT = config.DOM_SNAPSHOT_TRIAL_CNT();
     DATA_DIRECTORY = config.DATA_DIRECTORY(); 
     // == ANALYSIS_GROUP ==
     ANALYSIS_METHOD = config.ANALYSIS_METHOD(); 
@@ -1002,7 +1004,34 @@ void Experiment::Snapshot__PopulationStats(size_t u) {
 }
 
 void Experiment::Snapshot__Dominant(size_t u) {
+  emp_assert(RUN_MODE == RUN_ID__EVO);
 
+  std::string snapshot_dir = DATA_DIRECTORY + "pop_" + emp::to_string((int)u);
+  mkdir(snapshot_dir.c_str(), ACCESSPERMS);
+  
+  emp::vector<double> scores(DOM_SNAPSHOT_TRIAL_CNT,0);
+  
+  agent_t & dom_agent = world->GetOrg(dom_agent_id);
+
+  begin_agent_eval_sig.Trigger(dom_agent);
+  for (size_t i = 0; i < DOM_SNAPSHOT_TRIAL_CNT; ++i) {
+    trial_id = 0;
+    begin_agent_trial_sig.Trigger(dom_agent);
+    do_agent_trial_sig.Trigger(dom_agent);
+    end_agent_trial_sig.Trigger(dom_agent);
+    // Grab score
+    scores[i] = phen_cache.Get(dom_agent.GetID(), trial_id).GetScore();
+  }
+
+  // Output stuff to file.
+  // Output shit.
+  std::ofstream prog_ofstream(snapshot_dir + "/dom_" + emp::to_string((int)u) + ".csv");
+  // Fill out the header.
+  prog_ofstream << "trial,fitness";
+  for (size_t tID = 0; tID < DOM_SNAPSHOT_TRIAL_CNT; ++tID) {
+    prog_ofstream << "\n" << tID << "," << scores[tID];
+  }
+  prog_ofstream.close();
 }
 
 void Experiment::Snapshot__MAP(size_t u) {
@@ -1287,7 +1316,6 @@ void Experiment::DoConfig__Evolution() {
       if (score > best_score) { best_score = score; dom_agent_id = id; }
     }
     std::cout << "Update: " << update << " Max score: " << best_score << std::endl;
-    // if (update % POP_SNAPSHOT_INTERVAL == 0) do_pop_snapshot_sig.Trigger(update);
   });
 
   do_begin_run_setup_sig.AddAction([this]() {
@@ -1298,6 +1326,8 @@ void Experiment::DoConfig__Evolution() {
   do_world_update_sig.AddAction([this]() {
     world->DoMutations(ELITE_SELECT__ELITE_CNT);
   });
+
+  do_pop_snapshot_sig.AddAction([this](size_t u) { this->Snapshot__Dominant(u); });
 
   // Setup selection
   switch (SELECTION_METHOD) {
