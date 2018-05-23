@@ -903,7 +903,102 @@ void Experiment::Snapshot__Programs(size_t u) {
 }
 
 void Experiment::Snapshot__PopulationStats(size_t u) {
-  // TODO: implement
+  std::string snapshot_dir = DATA_DIRECTORY + "pop_" + emp::to_string((int)update);
+  mkdir(snapshot_dir.c_str(), ACCESSPERMS);
+  emp::DataFile file(snapshot_dir + "/pop_" + emp::to_string((int)update) + ".csv");
+  
+  std::function<size_t(void)> get_update = [this](){ return world->GetUpdate(); };
+  file.AddFun(get_update, "update", "Update");
+
+  size_t world_id = 0;
+  std::function<size_t(void)> get_id = [this, &world_id]() { return world_id; };
+  file.AddFun(get_id, "id", "...");
+
+  std::function<size_t(void)> get_func_used = [this, &world_id]() {
+    phenotype_t & phen = phen_cache.GetRepresentativePhen(world_id);
+    return phen.GetFunctionsUsed();
+  };
+  file.AddFun(get_func_used, "func_used", "...");
+
+  std::function<double(void)> get_inst_ent = [this, &world_id]() {
+    phenotype_t & phen = phen_cache.GetRepresentativePhen(world_id);
+    return phen.GetInstEntropy();
+  };
+  file.AddFun(get_inst_ent, "inst_entropy", "...");
+
+  std::function<double(void)> get_sim_thresh = [this, &world_id]() {
+    phenotype_t & phen = phen_cache.GetRepresentativePhen(world_id);
+    return phen.GetSimilarityThreshold();
+  };
+  file.AddFun(get_sim_thresh, "sim_thresh", "...");
+
+  std::function<double(void)> get_score = [this, &world_id]() {
+    phenotype_t & phen = phen_cache.GetRepresentativePhen(world_id);
+    return phen.GetScore();
+  };
+  file.AddFun(get_score, "score", "...");
+
+  std::function<size_t(void)> get_env_match_score = [this, &world_id]() {
+    phenotype_t & phen = phen_cache.GetRepresentativePhen(world_id);
+    return phen.GetEnvMatchScore();
+  };
+  file.AddFun(get_env_match_score, "env_matches", "...");
+
+  if (TASKS_ON) {
+    std::function<size_t(void)> get_time_all_tasks_credited = [this, &world_id]() {
+      phenotype_t & phen = phen_cache.GetRepresentativePhen(world_id);
+      return phen.GetTimeAllTasksCredited();
+    };
+    file.AddFun(get_time_all_tasks_credited, "time_all_tasks_credited", "...");
+
+    std::function<size_t(void)> get_unique_tasks_completed = [this, &world_id]() {
+      phenotype_t & phen = phen_cache.GetRepresentativePhen(world_id);
+      return phen.GetUniqueTasksCompleted();
+    };
+    file.AddFun(get_unique_tasks_completed, "total_unique_tasks_completed", "...");
+
+    std::function<size_t(void)> get_total_wasted_completions = [this, &world_id]() {
+      phenotype_t & phen = phen_cache.GetRepresentativePhen(world_id);
+      return phen.GetTotalWastedCompletions();
+    };
+    file.AddFun(get_total_wasted_completions, "total_wasted_completions", "...");
+
+    std::function<size_t(void)> get_unique_tasks_credited = [this, &world_id]() {
+      phenotype_t & phen = phen_cache.GetRepresentativePhen(world_id);
+      return phen.GetUniqueTasksCredited();
+    };
+    file.AddFun(get_unique_tasks_credited, "total_unique_tasks_credited", "...");
+
+    for (size_t i = 0; i < task_set.GetSize(); ++i) {
+      std::function<size_t(void)> get_wasted = [this, i, &world_id]() {
+      phenotype_t & phen = phen_cache.GetRepresentativePhen(world_id);
+        return phen.GetWastedCompletions(i);
+      };
+      file.AddFun(get_wasted, "wasted_"+task_set.GetName(i), "...");
+
+      std::function<size_t(void)> get_completed = [this, i, &world_id]() {
+      phenotype_t & phen = phen_cache.GetRepresentativePhen(world_id);
+        return phen.GetCompleted(i);
+      };
+      file.AddFun(get_completed, "completed_"+task_set.GetName(i), "...");
+
+      std::function<size_t(void)> get_credited = [this, i, &world_id]() {
+      phenotype_t & phen = phen_cache.GetRepresentativePhen(world_id);
+        return phen.GetCredited(i);
+      };
+      file.AddFun(get_credited, "credited_"+task_set.GetName(i), "...");
+    }
+  }
+  file.PrintHeaderKeys();
+
+  // Loop through population, evaluate, update file.
+  for (world_id = 0; world_id < world->GetSize(); ++world_id) {
+    if (!world->IsOccupied(world_id)) continue;
+    agent_t & agent = world->GetOrg(world_id);
+    agent.SetID(world_id);
+    this->Evaluate(agent);
+    file.Update();
+  }
 }
 
 void Experiment::Snapshot__Dominant(size_t u) {
@@ -1354,7 +1449,7 @@ void Experiment::DoConfig__Experiment() {
   // - Do world update
   do_world_update_sig.AddAction([this]() {
     if (update % POP_SNAPSHOT_INTERVAL == 0) do_pop_snapshot_sig.Trigger(update);
-    world->Update();
+    world->Update(); 
   });
 
   // - Do begin run setup (common to MAP-elites and regular EA)
