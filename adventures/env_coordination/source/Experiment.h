@@ -1035,7 +1035,42 @@ void Experiment::Snapshot__Dominant(size_t u) {
 }
 
 void Experiment::Snapshot__MAP(size_t u) {
+  emp_assert(RUN_MODE == RUN_ID__MAPE);
 
+  std::string snapshot_dir = DATA_DIRECTORY + "pop_" + emp::to_string((int)u);
+  mkdir(snapshot_dir.c_str(), ACCESSPERMS);
+
+  std::ofstream prog_ofstream(snapshot_dir + "/map_" + emp::to_string((int)u) + ".csv");
+  // Fill out the header.
+  prog_ofstream << "agent_id,trial,fitness,func_used,inst_entropy,sim_thresh";
+  
+  for (size_t aID = 0; aID < world->GetSize(); ++aID) {
+    if (!world->IsOccupied(aID)) continue;
+    agent_t & agent = world->GetOrg(aID);
+
+
+    emp::vector<double> scores(DOM_SNAPSHOT_TRIAL_CNT, 0);
+    emp::vector<size_t> func_used(DOM_SNAPSHOT_TRIAL_CNT, 0);
+
+    begin_agent_eval_sig.Trigger(agent);
+    for (size_t i = 0; i < DOM_SNAPSHOT_TRIAL_CNT; ++i) {
+      trial_id = 0;
+      begin_agent_trial_sig.Trigger(agent);
+      do_agent_trial_sig.Trigger(agent);
+      end_agent_trial_sig.Trigger(agent);
+      // Grab score
+      scores[i] = phen_cache.Get(agent.GetID(), trial_id).GetScore();
+      func_used[i] = phen_cache.Get(agent.GetID(), trial_id).GetFunctionsUsed();
+    }
+    double entropy = phen_cache.Get(agent.GetID(), 0).GetInstEntropy();
+    double sim_thresh = phen_cache.Get(agent.GetID(), 0).GetSimilarityThreshold();
+
+    // Output stuff to file.
+    for (size_t tID = 0; tID < DOM_SNAPSHOT_TRIAL_CNT; ++tID) {
+      prog_ofstream << "\n" << aID << "," << tID << "," << scores[tID] << "," << func_used[tID] << "," << entropy << "," << sim_thresh;
+    }
+  }
+  prog_ofstream.close();
 }
 
 emp::DataFile & Experiment::AddDominantFile(const std::string & fpath="dominant.csv") {
@@ -1394,6 +1429,8 @@ void Experiment::DoConfig__MAPElites() {
   do_world_update_sig.AddAction([this]() {
     world->ClearCache();
   });
+
+  do_pop_snapshot_sig.AddAction([this](size_t u) { this->Snapshot__MAP(u); });
 
 }
   
