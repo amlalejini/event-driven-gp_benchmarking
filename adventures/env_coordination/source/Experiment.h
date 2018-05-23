@@ -34,6 +34,9 @@ constexpr uint32_t MIN_TASK_INPUT = 0;
 constexpr uint32_t MAX_TASK_INPUT = 1000000000;
 constexpr size_t MAX_TASK_NUM_INPUTS = 2;
 
+constexpr double MAX_SIM_THRESH = 1.0;
+constexpr double MIN_SIM_THRESH = 0.0;
+
 constexpr size_t RUN_ID__EVO = 0;
 constexpr size_t RUN_ID__MAPE = 1;
 constexpr size_t RUN_ID__ANALYSIS = 2;
@@ -57,6 +60,7 @@ class Experiment {
 public:
   // Forward declarations.
   struct Agent;
+  struct Genome;
   struct Phenotype;
   class PhenotypeCache;
 
@@ -77,29 +81,41 @@ public:
   using agent_t = Agent;
   using phenotype_t = Phenotype;
   using phen_cache_t = PhenotypeCache;
+  using genome_t = Genome;
   // - World aliases
   using world_t = emp::World<agent_t>;
   using task_io_t = uint32_t;
   using taskset_t = TaskSet<std::array<task_io_t, MAX_TASK_NUM_INPUTS>, task_io_t>;
 
+  struct Genome {
+    program_t program;
+    double sim_thresh;
+
+    Genome(const program_t & _p, double _s=0) : program(_p), sim_thresh(_s) { ; }
+    Genome(const Genome && in) : program(in.program), sim_thresh(in.sim_thresh) { ; }
+    Genome(const Genome & in) : program(in.program), sim_thresh(in.sim_thresh) { ; } 
+
+  };
 
   /// Agent to be evolved.
   struct Agent {
     size_t agent_id;
-    program_t program;
-    double sim_thresh;
+    genome_t genome;
 
-    Agent(const program_t & _p) : agent_id(0), program(_p), sim_thresh(0) { ; }
-    Agent(const Agent && in) : agent_id(in.GetID()), program(in.program), sim_thresh(in.sim_thresh) { ; }
-    Agent(const Agent & in): agent_id(in.GetID()), program(in.program), sim_thresh(in.sim_thresh) { ; }
+    Agent(const program_t & _p, double _s=0) : agent_id(0), genome(_p, _s) { ; }
+    Agent(const genome_t & _g) : agent_id(0), genome(_g) { ; }
+    Agent(const Agent && in) : agent_id(in.GetID()), genome(in.genome) { ; }
+    Agent(const Agent & in) : agent_id(in.GetID()), genome(in.genome) { ; }
 
     size_t GetID() const { return agent_id; }
     void SetID(size_t id) { agent_id = id; }
 
-    double GetSimilarityThreshold() const { return sim_thresh; }
-    void SetSimilarityThreshold(double val) { sim_thresh = val; }
+    double GetSimilarityThreshold() const { return genome.sim_thresh; }
+    void SetSimilarityThreshold(double val) { genome.sim_thresh = val; }
 
-    program_t & GetGenome() { return program; }
+    genome_t & GetGenome() { return genome; }
+    program_t & GetProgram() { return genome.program; }
+
   };
   // TODO: reset phenotype on begin trial... 
   /// Phenotype of agents being evolved.
@@ -634,8 +650,16 @@ public:
 
 
   // === Systematics Functions ===
+  /// Snapshot all programs for current update
   void Snapshot__Programs(size_t u); 
-  void Snapshot__Stats(size_t u);
+  /// Snapshot population statistics for current update
+  void Snapshot__PopulationStats(size_t u);
+  /// Snapshot dominant program performance over many trials (only makes sense in context of EA run)
+  void Snapshot__Dominant(size_t u); 
+  /// Snapshot map from map-elites (only makes sense in context of MAP-Elites run)
+  void Snapshot__MAP(size_t u);
+
+  emp::DataFile & AddDominantFile(const std::string & fpath);
 
   // === Extra SignalGP instruction definitions ===
   // -- Execution control instructions --
@@ -741,8 +765,8 @@ size_t Experiment::MutateSimilarityThresh(agent_t & agent, emp::Random & rnd) {
   // TODO: double check functionality of this mutation operator
   if (rnd.P(SGP_MUT_PER_AGENT__SIM_THRESH_RATE)) {
     double new_val = agent.GetSimilarityThreshold() + rnd.GetRandNormal(0, SGP_MUT_PER_AGENT__SIM_THRESH_STD);
-    if (new_val > 100.0) new_val = 100.0;
-    else if (new_val < 0.0) new_val = 0.0;
+    if (new_val > MAX_SIM_THRESH) new_val = MAX_SIM_THRESH;
+    else if (new_val < MIN_SIM_THRESH) new_val = MIN_SIM_THRESH;
 
     agent.SetSimilarityThreshold(new_val);
     return 1;
@@ -823,9 +847,6 @@ void Experiment::GenerateEnvTags__FromTagFile() {
 void Experiment::InitPopulation__FromAncestorFile() {
   std::cout << "Initializing population from ancestor file (" << ANCESTOR_FPATH << ")!" << std::endl;
   // Configure the ancestor program.
-  world->OnInjectReady([this](agent_t & agent) {
-    agent.SetSimilarityThreshold(SGP_HW_MIN_BIND_THRESH);
-  });
   program_t ancestor_prog(inst_lib);
   std::ifstream ancestor_fstream(ANCESTOR_FPATH);
   if (!ancestor_fstream.is_open()) {
@@ -836,15 +857,12 @@ void Experiment::InitPopulation__FromAncestorFile() {
   std::cout << " --- Ancestor program: ---" << std::endl;
   ancestor_prog.PrintProgramFull();
   std::cout << " -------------------------" << std::endl;
-  world->Inject(ancestor_prog, POP_SIZE);    // Inject population!
-  // TODO: test that things aren't being mutated!
+  genome_t ancestor_genome(ancestor_prog, SGP_HW_MIN_BIND_THRESH);
+  world->Inject(ancestor_genome, POP_SIZE);    // Inject population!
 }
 
 void Experiment::InitPopulation__Random() {
-  world->OnInjectReady([this](agent_t & agent) {
-    // Randomize similarity threshold
-    agent.SetSimilarityThreshold(random->GetDouble(0.0, 100.0));
-  });
+  std::cout << "Randomly initializing population!" << std::endl;
   // Inject random agents up to population size.
   for (size_t i = 0; i < POP_SIZE; ++i) {
     program_t ancestor_prog(inst_lib);
@@ -863,8 +881,10 @@ void Experiment::InitPopulation__Random() {
       }
       ancestor_prog.PushFunction(new_fun);
     }
-    world->Inject(ancestor_prog, 1);  
+    genome_t ancestor_genome(ancestor_prog, random->GetDouble(MIN_SIM_THRESH, MAX_SIM_THRESH));
+    world->Inject(ancestor_genome, 1);  
   }
+  std::cout << "Done randomly initializing population!" << std::endl;
 }
 
 // == Systematics functions ==
@@ -877,14 +897,109 @@ void Experiment::Snapshot__Programs(size_t u) {
     if (!world->IsOccupied(i)) continue;
     prog_ofstream << "==="<<i<<":"<<world->CalcFitnessID(i)<<","<<world->GetOrg(i).GetSimilarityThreshold()<<"===\n";
     Agent & agent = world->GetOrg(i);
-    agent.program.PrintProgramFull(prog_ofstream);
+    agent.GetProgram().PrintProgramFull(prog_ofstream);
   }
   prog_ofstream.close();
 }
 
-void Experiment::Snapshot__Stats(size_t u) {
+void Experiment::Snapshot__PopulationStats(size_t u) {
   // TODO: implement
 }
+
+void Experiment::Snapshot__Dominant(size_t u) {
+
+}
+
+void Experiment::Snapshot__MAP(size_t u) {
+
+}
+
+emp::DataFile & Experiment::AddDominantFile(const std::string & fpath="dominant.csv") {
+  auto & file = world->SetupFile(fpath);
+
+  std::function<size_t(void)> get_update = [this](){ return world->GetUpdate(); };
+  file.AddFun(get_update, "update", "Update");
+
+  std::function<size_t(void)> get_func_used = [this]() {
+    phenotype_t & phen = phen_cache.GetRepresentativePhen(dom_agent_id);
+    return phen.GetFunctionsUsed();
+  };
+  file.AddFun(get_func_used, "func_used", "Number of functions used by program");
+
+  std::function<double(void)> get_inst_ent = [this]() {
+    phenotype_t & phen = phen_cache.GetRepresentativePhen(dom_agent_id);
+    return phen.GetInstEntropy();
+  };
+  file.AddFun(get_inst_ent, "inst_entropy", "Instruction entropy of program");
+
+  std::function<double(void)> get_sim_thresh = [this]() {
+    phenotype_t & phen = phen_cache.GetRepresentativePhen(dom_agent_id);
+    return phen.GetSimilarityThreshold();
+  };
+  file.AddFun(get_sim_thresh, "sim_thresh", "Similarity threshold of program");
+
+  std::function<double(void)> get_score = [this]() {
+    phenotype_t & phen = phen_cache.GetRepresentativePhen(dom_agent_id);
+    return phen.GetScore();
+  };
+  file.AddFun(get_score, "score", "Score of program");
+
+  std::function<size_t(void)> get_env_match_score = [this]() {
+    phenotype_t & phen = phen_cache.GetRepresentativePhen(dom_agent_id);
+    return phen.GetEnvMatchScore();
+  };
+  file.AddFun(get_env_match_score, "env_matches", "Number of environment states matched by agent");
+
+  if (TASKS_ON) { 
+    std::function<size_t(void)> get_time_all_tasks_credited = [this]() {
+      phenotype_t & phen = phen_cache.GetRepresentativePhen(dom_agent_id);
+      return phen.GetTimeAllTasksCredited();
+    };
+    file.AddFun(get_time_all_tasks_credited, "time_all_tasks_credited", "...");
+
+    std::function<size_t(void)> get_unique_tasks_completed = [this]() {
+      phenotype_t & phen = phen_cache.GetRepresentativePhen(dom_agent_id);
+      return phen.GetUniqueTasksCompleted();
+    };
+    file.AddFun(get_unique_tasks_completed, "total_unique_tasks_completed", "...");
+
+    std::function<size_t(void)> get_total_wasted_completions = [this]() {
+      phenotype_t & phen = phen_cache.GetRepresentativePhen(dom_agent_id);
+      return phen.GetTotalWastedCompletions();
+    };
+    file.AddFun(get_total_wasted_completions, "total_wasted_completions", "...");
+
+    std::function<size_t(void)> get_unique_tasks_credited = [this]() {
+      phenotype_t & phen = phen_cache.GetRepresentativePhen(dom_agent_id);
+      return phen.GetUniqueTasksCredited();
+    };
+    file.AddFun(get_unique_tasks_credited, "total_unique_tasks_credited", "...");
+
+    for (size_t i = 0; i < task_set.GetSize(); ++i) {
+      std::function<size_t(void)> get_wasted = [this, i]() {
+        phenotype_t & phen = phen_cache.GetRepresentativePhen(dom_agent_id);
+        return phen.GetWastedCompletions(i);
+      };
+      file.AddFun(get_wasted, "wasted_"+task_set.GetName(i), "...");
+
+      std::function<size_t(void)> get_completed = [this, i]() {
+        phenotype_t & phen = phen_cache.GetRepresentativePhen(dom_agent_id);
+        return phen.GetCompleted(i);
+      };
+      file.AddFun(get_completed, "completed_"+task_set.GetName(i), "...");
+
+      std::function<size_t(void)> get_credited = [this, i]() {
+        phenotype_t & phen = phen_cache.GetRepresentativePhen(dom_agent_id);
+        return phen.GetCredited(i);
+      };
+      file.AddFun(get_credited, "credited_"+task_set.GetName(i), "...");
+    }
+  }
+  file.PrintHeaderKeys();
+  return file;
+
+}
+
 
 // == Configuration functions ==
 void Experiment::DoConfig__Tasks() {
@@ -1035,13 +1150,14 @@ void Experiment::DoConfig__Hardware() {
 
   inst_ent_fun = [](agent_t & agent) {
     emp::vector<inst_t> inst_seq;
-    program_t & prog = agent.GetGenome();
+    program_t & prog = agent.GetProgram();
     for (size_t i = 0; i < prog.GetSize(); ++i) {
       for (size_t k = 0; k < prog[i].GetSize(); ++k) {
         inst_seq.emplace_back(prog[i][k].id);
       }
     }
     const double ent = emp::ShannonEntropy(inst_seq);
+    if (ent < 0.0) return 0.0;
     return ent;
   };
   
@@ -1080,8 +1196,7 @@ void Experiment::DoConfig__Evolution() {
   });
 
   do_begin_run_setup_sig.AddAction([this]() {
-    // TODO: finish this
-    // this->AddDominantFile(DATA_DIRECTORY + "dominant.csv").SetTimingRepeat(SYSTEMATICS_INTERVAL);
+    this->AddDominantFile(DATA_DIRECTORY + "dominant.csv").SetTimingRepeat(SYSTEMATICS_INTERVAL);
   });
 
   // This assumes that this config function gets called after the general experiment config function.
@@ -1125,15 +1240,18 @@ void Experiment::DoConfig__MAPElites() {
 
   emp::vector<size_t> trait_bin_sizes;
   if (MAP_ELITES_AXIS__INST_ENTROPY) {
+    std::cout << "Configuring instruction entropy axis" << std::endl;
     world->AddPhenotype("InstEntropy", inst_ent_fun, 0.0, max_inst_entropy + 0.1);
     trait_bin_sizes.emplace_back(MAP_ELITES_AXIS_RES__INST_ENTROPY);
   }
   if (MAP_ELITES_AXIS__FUNCTIONS_USED) {
-    world->AddPhenotype("FunctionsUsed", func_cnt_fun, SGP_PROG_MIN_FUNC_CNT, SGP_PROG_MAX_FUNC_CNT+1);
-    trait_bin_sizes.emplace_back(SGP_PROG_MAX_FUNC_CNT);
+    std::cout << "Configuring functions used axis" << std::endl;
+    world->AddPhenotype("FunctionsUsed", func_cnt_fun, 0, SGP_PROG_MAX_FUNC_CNT+1);
+    trait_bin_sizes.emplace_back(SGP_PROG_MAX_FUNC_CNT+1);
   }
   if (MAP_ELITES_AXIS__SIMILARITY_THRESH) {
-    world->AddPhenotype("SimilarityThreshold", get_sim_thresh_fun, 0.0, 100.0+1.0);
+    std::cout << "Configuring similarity threshold axis" << std::endl;
+    world->AddPhenotype("SimilarityThreshold", get_sim_thresh_fun, MIN_SIM_THRESH, MAX_SIM_THRESH+0.01);
     trait_bin_sizes.emplace_back(MAP_ELITES_AXIS_RES__SIMILARITY_THRESH);
   }
 
@@ -1196,14 +1314,14 @@ void Experiment::DoConfig__Experiment() {
   // Configure mutations
   if (EVOLVE_SIMILARITY_THRESH) {
     mutate_agent = [this](agent_t & agent, emp::Random & rnd) {
-      program_t & program = agent.GetGenome();
+      program_t & program = agent.GetProgram();
       size_t mut_cnt = mutator.ApplyMutations(program, rnd);
       mut_cnt += this->MutateSimilarityThresh(agent, rnd);
       return mut_cnt;
     };
   } else {
     mutate_agent = [this](agent_t & agent, emp::Random & rnd) {
-      program_t & program = agent.GetGenome();
+      program_t & program = agent.GetProgram();
       return mutator.ApplyMutations(program, rnd);
     };
   }
@@ -1231,7 +1349,7 @@ void Experiment::DoConfig__Experiment() {
   // Configure signals
   // - Pop snapshots!
   do_pop_snapshot_sig.AddAction([this](size_t u) { this->Snapshot__Programs(u); });
-  do_pop_snapshot_sig.AddAction([this](size_t u) { this->Snapshot__Stats(u); });
+  do_pop_snapshot_sig.AddAction([this](size_t u) { this->Snapshot__PopulationStats(u); });
 
   // - Do world update
   do_world_update_sig.AddAction([this]() {
@@ -1259,8 +1377,9 @@ void Experiment::DoConfig__Experiment() {
 
   // - Begin agent eval signal
   begin_agent_eval_sig.AddAction([this](agent_t & agent) {
-    eval_hw->SetProgram(agent.GetGenome());
+    eval_hw->SetProgram(agent.GetProgram());
   });
+
   if (EVOLVE_SIMILARITY_THRESH) {
     // Set similarity threshold on eval hardware at beginning of evaluation.
     begin_agent_eval_sig.AddAction([this](agent_t & agent) {
