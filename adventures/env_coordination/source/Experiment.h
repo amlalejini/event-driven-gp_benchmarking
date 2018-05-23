@@ -89,9 +89,9 @@ public:
     program_t program;
     double sim_thresh;
 
-    Agent(const program_t & _p) : agent_id(0), program(_p) { ; }
-    Agent(const Agent && in) : agent_id(in.GetID()), program(in.program) { ; }
-    Agent(const Agent & in): agent_id(in.GetID()), program(in.program) { ; }
+    Agent(const program_t & _p) : agent_id(0), program(_p), sim_thresh(0) { ; }
+    Agent(const Agent && in) : agent_id(in.GetID()), program(in.program), sim_thresh(in.sim_thresh) { ; }
+    Agent(const Agent & in): agent_id(in.GetID()), program(in.program), sim_thresh(in.sim_thresh) { ; }
 
     size_t GetID() const { return agent_id; }
     void SetID(size_t id) { agent_id = id; }
@@ -823,6 +823,9 @@ void Experiment::GenerateEnvTags__FromTagFile() {
 void Experiment::InitPopulation__FromAncestorFile() {
   std::cout << "Initializing population from ancestor file (" << ANCESTOR_FPATH << ")!" << std::endl;
   // Configure the ancestor program.
+  world->OnInjectReady([this](agent_t & agent) {
+    agent.SetSimilarityThreshold(SGP_HW_MIN_BIND_THRESH);
+  });
   program_t ancestor_prog(inst_lib);
   std::ifstream ancestor_fstream(ANCESTOR_FPATH);
   if (!ancestor_fstream.is_open()) {
@@ -872,7 +875,7 @@ void Experiment::Snapshot__Programs(size_t u) {
   std::ofstream prog_ofstream(snapshot_dir + "/pop_" + emp::to_string((int)u) + ".pop");
   for (size_t i = 0; i < world->GetSize(); ++i) {
     if (!world->IsOccupied(i)) continue;
-    prog_ofstream << "==="<<i<<":"<<world->CalcFitnessID(i)<<"===\n";
+    prog_ofstream << "==="<<i<<":"<<world->CalcFitnessID(i)<<","<<world->GetOrg(i).GetSimilarityThreshold()<<"===\n";
     Agent & agent = world->GetOrg(i);
     agent.program.PrintProgramFull(prog_ofstream);
   }
@@ -1073,12 +1076,17 @@ void Experiment::DoConfig__Evolution() {
       if (score > best_score) { best_score = score; dom_agent_id = id; }
     }
     std::cout << "Update: " << update << " Max score: " << best_score << std::endl;
-    if (update % POP_SNAPSHOT_INTERVAL == 0) do_pop_snapshot_sig.Trigger(update);
+    // if (update % POP_SNAPSHOT_INTERVAL == 0) do_pop_snapshot_sig.Trigger(update);
   });
 
   do_begin_run_setup_sig.AddAction([this]() {
     // TODO: finish this
     // this->AddDominantFile(DATA_DIRECTORY + "dominant.csv").SetTimingRepeat(SYSTEMATICS_INTERVAL);
+  });
+
+  // This assumes that this config function gets called after the general experiment config function.
+  do_world_update_sig.AddAction([this]() {
+    world->DoMutations(ELITE_SELECT__ELITE_CNT);
   });
 
   // Setup selection
@@ -1102,7 +1110,8 @@ void Experiment::DoConfig__MAPElites() {
   std::cout << "Configure the strange world of MAP-Elites." << std::endl;
 
   world->SetCache(true);
-
+  world->SetAutoMutate();
+  // NOTE: i may need to set mutate on birth to be true!
   world->SetFitFun([this](agent_t & agent) {
     const size_t id = 0;
     agent.SetID(id);
@@ -1143,12 +1152,7 @@ void Experiment::DoConfig__MAPElites() {
     world->ClearCache();
   });
 
-
 }
-
-  // do_begin_run_setup_sig --> Specific
-  // do_evaluation_sig      --> Specific
-  // do_selection_sig       --> Specific
   
 void Experiment::DoConfig__Experiment() {
   // Make a data directory. 
@@ -1231,6 +1235,7 @@ void Experiment::DoConfig__Experiment() {
 
   // - Do world update
   do_world_update_sig.AddAction([this]() {
+    if (update % POP_SNAPSHOT_INTERVAL == 0) do_pop_snapshot_sig.Trigger(update);
     world->Update();
   });
 
