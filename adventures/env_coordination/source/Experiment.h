@@ -48,7 +48,8 @@ constexpr size_t POP_INIT_METHOD_ID__ANCESTOR = 0;
 constexpr size_t POP_INIT_METHOD_ID__RANDOM = 1;
 
 constexpr size_t ENV_CHG_METHOD_ID__RANDOM = 0;
-constexpr size_t ENV_CHG_METHOD_ID__REGULAR = 1;
+constexpr size_t ENV_CHG_METHOD_ID__SHUFFLED = 1;
+constexpr size_t ENV_CHG_METHOD_ID__REGULAR = 2;
 
 constexpr size_t TRAIT_ID__STATE = 0;
 
@@ -122,6 +123,7 @@ public:
   struct Phenotype {
     double env_match_score;
     size_t functions_used;
+    size_t function_cnt;
     double inst_entropy;
     double sim_thresh;
 
@@ -141,6 +143,7 @@ public:
     Phenotype(size_t _task_cnt=0) 
       : env_match_score(0),
         functions_used(0),
+        function_cnt(0),
         inst_entropy(0),
         sim_thresh(0),
         score(0),
@@ -158,6 +161,7 @@ public:
     void Reset() {
       env_match_score = 0;
       functions_used = 0;
+      function_cnt = 0;
       sim_thresh = 0;
       score = 0;
       time_all_tasks_credited = 0;
@@ -182,6 +186,7 @@ public:
 
     double GetEnvMatchScore() const { return env_match_score; }
     size_t GetFunctionsUsed() const { return functions_used; }
+    size_t GetFunctionCnt() const { return function_cnt; }
     double GetInstEntropy() const { return inst_entropy; }
     double GetSimilarityThreshold() const { return sim_thresh; }
     double GetScore() const { return score; }
@@ -205,6 +210,7 @@ public:
 
     void SetEnvMatchScore(double val) { env_match_score = val; }
     void SetFunctionsUsed(size_t val) { functions_used = val; }
+    void SetFunctionCnt(size_t val) { function_cnt = val; }
     void SetInstEntropy(double val) { inst_entropy = val; }
     void SetSimilarityThreshold(double val) { sim_thresh = val; }
     void SetScore(double val) { score = val; }
@@ -315,6 +321,7 @@ protected:
   size_t ELITE_SELECT__ELITE_CNT; 
   bool MAP_ELITES_AXIS__INST_ENTROPY; 
   bool MAP_ELITES_AXIS__FUNCTIONS_USED; 
+  bool MAP_ELITES_AXIS__FUNCTION_CNT;
   bool MAP_ELITES_AXIS__SIMILARITY_THRESH; 
   size_t MAP_ELITES_AXIS_RES__INST_ENTROPY; 
   size_t MAP_ELITES_AXIS_RES__SIMILARITY_THRESH; 
@@ -365,6 +372,9 @@ protected:
 
   emp::vector<tag_t> env_state_tags;        ///< Tags associated with each environment state.
   emp::vector<tag_t> distraction_sig_tags;  ///< Tags associated with distraction signals.
+  emp::vector<size_t> env_shuffler;         ///< Used for keeping track of shuffled environment cycling.
+  size_t env_shuffle_id;
+
 
   taskset_t task_set;
   std::array<task_io_t, MAX_TASK_NUM_INPUTS> task_inputs;
@@ -411,6 +421,7 @@ protected:
   
   // For MAP-Elites
   std::function<double(agent_t &)> inst_ent_fun;
+  std::function<int(agent_t &)> func_used_fun;
   std::function<int(agent_t &)> func_cnt_fun;
   std::function<double(agent_t &)> get_sim_thresh_fun;
 
@@ -487,6 +498,7 @@ public:
     ELITE_SELECT__ELITE_CNT = config.ELITE_SELECT__ELITE_CNT(); 
     MAP_ELITES_AXIS__INST_ENTROPY = config.MAP_ELITES_AXIS__INST_ENTROPY(); 
     MAP_ELITES_AXIS__FUNCTIONS_USED = config.MAP_ELITES_AXIS__FUNCTIONS_USED(); 
+    MAP_ELITES_AXIS__FUNCTION_CNT = config.MAP_ELITES_AXIS__FUNCTION_CNT();
     MAP_ELITES_AXIS__SIMILARITY_THRESH = config.MAP_ELITES_AXIS__SIMILARITY_THRESH(); 
     MAP_ELITES_AXIS_RES__INST_ENTROPY = config.MAP_ELITES_AXIS_RES__INST_ENTROPY(); 
     MAP_ELITES_AXIS_RES__SIMILARITY_THRESH = config.MAP_ELITES_AXIS_RES__SIMILARITY_THRESH(); 
@@ -568,6 +580,10 @@ public:
       distraction_sig_tags[i].Print();
       std::cout << std::endl;
     }
+
+    // Populate environment shuffler!
+    for (size_t i = 0; i < env_state_tags.size(); ++i) env_shuffler.emplace_back(i);
+    env_shuffle_id = 0;
 
     // Make empty instruction/event libraries. Make hardware.
     inst_lib = emp::NewPtr<inst_lib_t>();
@@ -916,6 +932,12 @@ void Experiment::Snapshot__PopulationStats(size_t u) {
   std::function<size_t(void)> get_id = [this, &world_id]() { return world_id; };
   file.AddFun(get_id, "id", "...");
 
+  std::function<size_t(void)> get_func_cnt = [this, &world_id]() {
+    phenotype_t & phen = phen_cache.GetRepresentativePhen(world_id);
+    return phen.GetFunctionCnt();
+  };
+  file.AddFun(get_func_cnt, "func_cnt", "Number of functions in program");
+
   std::function<size_t(void)> get_func_used = [this, &world_id]() {
     phenotype_t & phen = phen_cache.GetRepresentativePhen(world_id);
     return phen.GetFunctionsUsed();
@@ -1042,7 +1064,7 @@ void Experiment::Snapshot__MAP(size_t u) {
 
   std::ofstream prog_ofstream(snapshot_dir + "/map_" + emp::to_string((int)u) + ".csv");
   // Fill out the header.
-  prog_ofstream << "agent_id,trial,fitness,func_used,inst_entropy,sim_thresh";
+  prog_ofstream << "agent_id,trial,fitness,func_cnt,func_used,inst_entropy,sim_thresh";
   
   for (size_t aID = 0; aID < world->GetSize(); ++aID) {
     if (!world->IsOccupied(aID)) continue;
@@ -1064,10 +1086,11 @@ void Experiment::Snapshot__MAP(size_t u) {
     }
     double entropy = phen_cache.Get(agent.GetID(), 0).GetInstEntropy();
     double sim_thresh = phen_cache.Get(agent.GetID(), 0).GetSimilarityThreshold();
+    size_t func_cnt = phen_cache.Get(agent.GetID(), 0).GetFunctionCnt();
 
     // Output stuff to file.
     for (size_t tID = 0; tID < DOM_SNAPSHOT_TRIAL_CNT; ++tID) {
-      prog_ofstream << "\n" << aID << "," << tID << "," << scores[tID] << "," << func_used[tID] << "," << entropy << "," << sim_thresh;
+      prog_ofstream << "\n" << aID << "," << tID << "," << scores[tID] << "," << func_cnt << "," << func_used[tID] << "," << entropy << "," << sim_thresh;
     }
   }
   prog_ofstream.close();
@@ -1078,6 +1101,12 @@ emp::DataFile & Experiment::AddDominantFile(const std::string & fpath="dominant.
 
   std::function<size_t(void)> get_update = [this](){ return world->GetUpdate(); };
   file.AddFun(get_update, "update", "Update");
+
+  std::function<size_t(void)> get_func_cnt = [this]() {
+    phenotype_t & phen = phen_cache.GetRepresentativePhen(dom_agent_id);
+    return phen.GetFunctionCnt();
+  };
+  file.AddFun(get_func_cnt, "func_cnt", "Number of functions in program");
 
   std::function<size_t(void)> get_func_used = [this]() {
     phenotype_t & phen = phen_cache.GetRepresentativePhen(dom_agent_id);
@@ -1320,8 +1349,12 @@ void Experiment::DoConfig__Hardware() {
     return ent;
   };
   
-  func_cnt_fun = [this](agent_t & agent) {
+  func_used_fun = [this](agent_t & agent) {
     return (int)functions_used.size();
+  };
+
+  func_cnt_fun = [](agent_t & agent) {
+    return (int)agent.GetProgram().GetSize();
   };
 
   get_sim_thresh_fun = [](agent_t & agent) {
@@ -1406,7 +1439,12 @@ void Experiment::DoConfig__MAPElites() {
   }
   if (MAP_ELITES_AXIS__FUNCTIONS_USED) {
     std::cout << "Configuring functions used axis" << std::endl;
-    world->AddPhenotype("FunctionsUsed", func_cnt_fun, 0, SGP_PROG_MAX_FUNC_CNT+1);
+    world->AddPhenotype("FunctionsUsed", func_used_fun, 0, SGP_PROG_MAX_FUNC_CNT+1);
+    trait_bin_sizes.emplace_back(SGP_PROG_MAX_FUNC_CNT+1);
+  }
+  if (MAP_ELITES_AXIS__FUNCTION_CNT) {
+    std::cout << "Configuring function cnt axis" << std::endl;
+    world->AddPhenotype("FunctionCnt", func_cnt_fun, SGP_PROG_MIN_FUNC_CNT, SGP_PROG_MAX_FUNC_CNT+1);
     trait_bin_sizes.emplace_back(SGP_PROG_MAX_FUNC_CNT+1);
   }
   if (MAP_ELITES_AXIS__SIMILARITY_THRESH) {
@@ -1414,6 +1452,12 @@ void Experiment::DoConfig__MAPElites() {
     world->AddPhenotype("SimilarityThreshold", get_sim_thresh_fun, MIN_SIM_THRESH, MAX_SIM_THRESH+0.01);
     trait_bin_sizes.emplace_back(MAP_ELITES_AXIS_RES__SIMILARITY_THRESH);
   }
+
+  size_t max_world_size = 1;
+  for (size_t i = 0; i < trait_bin_sizes.size(); ++i) max_world_size *= trait_bin_sizes[i];
+
+  std::cout << "Updated max world size: " << max_world_size << std::endl;
+  phen_cache.Resize(max_world_size, TRIAL_CNT);
 
   emp::SetMapElites(*world, trait_bin_sizes);
 
@@ -1523,7 +1567,7 @@ void Experiment::DoConfig__Experiment() {
   do_begin_run_setup_sig.AddAction([this]() {
     std::cout << "Doing initial run setup." << std::endl;
     // Setup phenotype task counts to match actual task counts.
-    for (size_t aID = 0; aID < POP_SIZE; ++aID) {
+    for (size_t aID = 0; aID < world->GetSize(); ++aID) {
       for (size_t tID = 0; tID < TRIAL_CNT; ++tID) {
         phen_cache.Get(aID, tID).SetTaskCnt(task_set.GetSize());
       }
@@ -1582,7 +1626,8 @@ void Experiment::DoConfig__Experiment() {
     const size_t agent_id = agent.GetID();
     phenotype_t & phen = phen_cache.Get(agent_id, trial_id);
     // Record everything that must be recorded post-trial
-    phen.SetFunctionsUsed(this->func_cnt_fun(agent));
+    phen.SetFunctionsUsed(this->func_used_fun(agent));
+    phen.SetFunctionCnt(this->func_cnt_fun(agent));
     phen.SetInstEntropy(this->inst_ent_fun(agent));
     phen.SetSimilarityThreshold(agent.GetSimilarityThreshold());
     phen.SetTimeAllTasksCredited(task_set.GetAllTasksCreditedTime());
@@ -1617,6 +1662,32 @@ void Experiment::DoConfig__Experiment() {
         }
       });
       break;
+    }
+    case ENV_CHG_METHOD_ID__SHUFFLED: {
+      do_env_advance_sig.AddAction([this]() {
+        if (env_state == (size_t)-1 || random->P(ENVIRONMENT_CHANGE_PROB)) {
+          
+          // What state should we switch to?
+          env_state = env_shuffler[env_shuffle_id]; 
+          env_shuffle_id += 1;
+
+          // std::cout << "Environment changes to: " << env_state << std::endl;
+
+          // If shuffle id exceeds env states, reset to 0 and shuffle!
+          if (env_shuffle_id >= ENVIRONMENT_STATES) {
+            env_shuffle_id = 0;
+            emp::Shuffle(*random, env_shuffler);
+            // std::cout << "---SHUFFLE TRIGGERED---" << std::endl;
+          }
+
+          // Trigger environment state event.
+          eval_hw->TriggerEvent("EnvSignal", env_state_tags[env_state]);
+        }
+      });
+      begin_agent_trial_sig.AddAction([this](agent_t & agent) {
+        env_shuffle_id = 0;
+        emp::Shuffle(*random, env_shuffler);
+      });
     }
     case ENV_CHG_METHOD_ID__REGULAR: {
       do_env_advance_sig.AddAction([this]() {

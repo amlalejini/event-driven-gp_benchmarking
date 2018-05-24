@@ -1,7 +1,7 @@
 #!/bin/bash -login
 
 ### Configure job:
-#PBS -l walltime=04:00:00:00
+#PBS -l walltime=02:00:00:00
 #PBS -l feature=intel16
 #PBS -l mem=8gb
 #PBS -t 1-320
@@ -152,7 +152,11 @@ CONFIG_DIR=/mnt/scratch/lalejini/data/gptp2018-evo-specificity/configs
 
 EXEC=l9_chg_env
 
-RUN_NAME=RM${RUN_MODE}_BT${SGP_HW_MIN_BIND_THRESH}_DS${ENVIRONMENT_DISTRACTION_SIGNALS}_${RANDOM_SEED}
+if [ ${EVOLVE_SIMILARITY_THRESH} -eq 1 ]; then
+  RUN_NAME=RM${RUN_MODE}_BTEVO_DS${ENVIRONMENT_DISTRACTION_SIGNALS}_${RANDOM_SEED}
+else
+  RUN_NAME=RM${RUN_MODE}_BT${SGP_HW_MIN_BIND_THRESH}_DS${ENVIRONMENT_DISTRACTION_SIGNALS}_${RANDOM_SEED}
+fi
 
 RUN_DIR=${DATA_DIR}/${RUN_NAME}
 
