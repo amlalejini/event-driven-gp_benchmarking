@@ -385,6 +385,8 @@ protected:
   size_t trial_time;
   size_t env_state;
 
+  size_t max_pop_size;
+
   size_t dom_agent_id;
   double best_score;
 
@@ -464,6 +466,7 @@ public:
       trial_id(0),
       trial_time(0),
       env_state(0),
+      max_pop_size(0),
       dom_agent_id(0),
       best_score(0),
       max_inst_entropy(0),
@@ -541,6 +544,7 @@ public:
 
     // Make the world!
     world = emp::NewPtr<world_t>(*random, "World");
+    max_pop_size = POP_SIZE;
 
     // Configure the phenotype cache.
     phen_cache.Resize(POP_SIZE, TRIAL_CNT);
@@ -1453,11 +1457,11 @@ void Experiment::DoConfig__MAPElites() {
     trait_bin_sizes.emplace_back(MAP_ELITES_AXIS_RES__SIMILARITY_THRESH);
   }
 
-  size_t max_world_size = 1;
-  for (size_t i = 0; i < trait_bin_sizes.size(); ++i) max_world_size *= trait_bin_sizes[i];
+  max_pop_size = 1;
+  for (size_t i = 0; i < trait_bin_sizes.size(); ++i) max_pop_size *= trait_bin_sizes[i];
 
-  std::cout << "Updated max world size: " << max_world_size << std::endl;
-  phen_cache.Resize(max_world_size, TRIAL_CNT);
+  std::cout << "Updated max world size: " << max_pop_size << std::endl;
+  phen_cache.Resize(max_pop_size, TRIAL_CNT);
 
   emp::SetMapElites(*world, trait_bin_sizes);
 
@@ -1567,7 +1571,7 @@ void Experiment::DoConfig__Experiment() {
   do_begin_run_setup_sig.AddAction([this]() {
     std::cout << "Doing initial run setup." << std::endl;
     // Setup phenotype task counts to match actual task counts.
-    for (size_t aID = 0; aID < world->GetSize(); ++aID) {
+    for (size_t aID = 0; aID < max_pop_size; ++aID) {
       for (size_t tID = 0; tID < TRIAL_CNT; ++tID) {
         phen_cache.Get(aID, tID).SetTaskCnt(task_set.GetSize());
       }
