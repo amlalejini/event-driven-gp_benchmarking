@@ -1,7 +1,7 @@
 #!/bin/bash -login
 
 ### Configure job:
-#PBS -l walltime=02:00:00:00
+#PBS -l walltime=04:00:00:00
 #PBS -l feature=intel16
 #PBS -l mem=8gb
 #PBS -t 1001-1320
@@ -157,7 +157,7 @@ elif [ ${PBS_ARRAYID} -ge ${EVO_BT1000__MIN} ] && [ ${PBS_ARRAYID} -le ${EVO_BT1
 elif [ ${PBS_ARRAYID} -ge ${MAPE_MIN__MIN} ] && [ ${PBS_ARRAYID} -le ${MAPE_MIN__MAX} ]; then
   RUN_MODE=1
   SGP_HW_MIN_BIND_THRESH=0.0
-  GENERATIONS=50000
+  GENERATIONS=100000
   POP_INIT_METHOD=1
   EVOLVE_SIMILARITY_THRESH=1
   POP_SNAPSHOT_INTERVAL=10000
